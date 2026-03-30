@@ -59,7 +59,7 @@ def run_morning_job(is_test_mode: bool = False, manual: bool = False):
     env_date_to = os.getenv("JOB_DATE_TO")
 
     # 기본값: 웹UI에서 저장한 자동 실행 대상 사용 (없으면 빈 dict)
-    saved_user_accounts = load_automation_target()
+    saved_user_accounts = load_automation_target(job="morning")
     user_accounts = saved_user_accounts
 
     # 테스트 모드 환경변수 우선 적용

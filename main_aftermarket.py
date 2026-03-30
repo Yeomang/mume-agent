@@ -54,7 +54,7 @@ def run_aftermarket_job(is_test_mode: bool = False, manual: bool = False):
     env_date_from = os.getenv("JOB_DATE_FROM")
     env_date_to = os.getenv("JOB_DATE_TO")
 
-    saved_user_accounts = load_automation_target()
+    saved_user_accounts = load_automation_target(job="aftermarket")
     user_accounts = saved_user_accounts
 
     if env_test_mode == "1":

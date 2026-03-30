@@ -52,7 +52,7 @@ def run_evening_job(is_test_mode: bool = False, manual: bool = False):
     env_user_accounts_json = os.getenv("JOB_USER_ACCOUNTS")
     env_test_mode = os.getenv("JOB_TEST_MODE")
 
-    saved_user_accounts = load_automation_target()
+    saved_user_accounts = load_automation_target(job="evening")
     user_accounts = saved_user_accounts
 
     if env_test_mode == "1":

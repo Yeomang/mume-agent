@@ -51,8 +51,8 @@ def run_cancel_orders_job(is_test_mode: bool = False, manual: bool = False):
     env_user_accounts_json = os.getenv("JOB_USER_ACCOUNTS")
     env_test_mode = os.getenv("JOB_TEST_MODE")
     
-    # 기본값: 웹UI에서 저장한 자동 실행 대상 사용 (없으면 빈 dict)
-    saved_user_accounts = load_automation_target()
+    # 기본값: Supabase에서 자동 실행 대상 조회 (실패 시 로컬 파일 폴백)
+    saved_user_accounts = load_automation_target(job="cancel_orders")
     user_accounts = saved_user_accounts
 
     if env_test_mode == "1":
