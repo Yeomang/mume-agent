@@ -37,6 +37,21 @@ pip install -r requirements.txt
 - `main_aftermarket.py` — 시간외 작업: 추가 매수 실행
 - `main_cancel_orders.py` — 미체결 주문 일괄 취소
 
+### API 엔드포인트 (hts_agent.py)
+| 메서드 | 경로 | 설명 |
+|--------|------|------|
+| GET | `/health` | 헬스체크 |
+| POST | `/run?job=<type>` | 작업 실행 (morning/evening/aftermarket/cancel_orders) |
+| POST | `/stop?job=<type>` | 작업 중지 + HTS 프로세스 종료 + 입력 잠금 해제 |
+| GET | `/status?job=<type>` | 작업 상태 조회 (never_run/running/success/error/stopped) |
+| GET | `/logs` | 로그 tail 조회 |
+| GET | `/processes` | HTS/Python 프로세스 상태 조회 |
+| GET | `/password-status?users=<csv>` | 비밀번호 설정 여부 확인 |
+| POST | `/update-passwords` | 비밀번호 저장 (Windows Credential Manager) |
+| POST | `/delete-passwords` | 비밀번호 삭제 |
+
+모든 엔드포인트는 `X-Agent-Key` 헤더로 인증. `/run`은 subprocess를 생성하며, `JOB_NAME`, `JOB_USER_ACCOUNTS`, `JOB_TEST_MODE`, `JOB_DATE_FROM`, `JOB_DATE_TO` 환경변수를 전달.
+
 ### 작업 실행 흐름
 ```
 웹 콘솔 → POST /run?job=evening → hts_agent.py
@@ -133,6 +148,9 @@ log.log                             # 애플리케이션 로그
 **에러 복구**: finally 블록에서 반드시 `block_input(False)` 호출. 예외 발생 시에도 마우스/키보드 잠금 해제.
 
 **텔레그램 알림**: 주문 실행 결과를 실시간으로 텔레그램에 전송.
+
+### 크로스 플랫폼 참고사항
+코드는 macOS에서 import/편집 가능하도록 `platform.system() == "Windows"` 분기 처리가 되어 있으나, **실제 GUI 자동화 실행은 Windows 전용**. `pywinauto`, `win32gui`, `block_input(ctypes.windll)` 등은 Windows에서만 동작.
 
 ### 관련 프로젝트
 - `mume-console` (`/Users/pio/Documents/mume-console`) — 웹 콘솔 (FastAPI + Supabase + 프론트엔드)

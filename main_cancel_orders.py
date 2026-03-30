@@ -9,7 +9,7 @@ import sys
 
 from hts_login import hts_login
 from hts_cancel_orders import hts_cancel_orders
-from utils import kill_window_by_title
+from utils import kill_window_by_title, send_telegram_message
 from job_control import register_job_pid, unregister_job_pid
 from automation_target_store import load_automation_target
 from config import Config
@@ -95,7 +95,12 @@ def run_cancel_orders_job(is_test_mode: bool = False, manual: bool = False):
     # ─────────────────────────────────────
     # 3) 메인 플로우
     # ─────────────────────────────────────
+    TELEGRAM_BOT_TOKEN = Config.TELEGRAM_BOT_TOKEN_ORDER
+    TELEGRAM_CHAT_ID = Config.TELEGRAM_CHAT_ID
+
     logging.info(f"자동실행대상: {user_accounts}")
+    results = []  # 결과 수집용
+
     for user, account_items in user_accounts.items():
         if not account_items:
             continue
@@ -105,23 +110,37 @@ def run_cancel_orders_job(is_test_mode: bool = False, manual: bool = False):
 
         for item in account_items:
             account_index = item["account"]
-            
+
             logging.info(f">>>>> {user}님의 {account_index}번 계좌 미체결 주문 일괄 취소 시작 <<<<<")
-            
+
             # 미체결 주문 일괄 취소 실행
             success, error = hts_cancel_orders(
                 user,
                 account_index,
                 is_test_mode,
             )
-            
+
             if success:
                 logging.info(f"[{user} | {account_index}번 계좌] 미체결 주문 일괄 취소 성공")
+                results.append(f"✅ {user} | {account_index}번 계좌: 성공")
             else:
                 logging.error(f"[{user} | {account_index}번 계좌] 미체결 주문 일괄 취소 실패: {error}")
+                results.append(f"❌ {user} | {account_index}번 계좌: 실패 - {error}")
 
         # HTS 프로그램 종료
         kill_window_by_title(hts_window_name)
+
+    # ─────────────────────────────────────
+    # 4) 텔레그램 알림 전송
+    # ─────────────────────────────────────
+    if results and TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        test_label = " [테스트]" if is_test_mode else ""
+        result_lines = "\n".join(results)
+        message = (
+            f"📋 *미체결 주문 일괄취소 완료{test_label}*\n\n"
+            f"{result_lines}"
+        )
+        send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message)
 
 
 def main():
