@@ -155,7 +155,8 @@ def hts_orders_from_supabase(
         if not computed:
             logging.info(f"사이클 #{cycle_seq}의 계산 데이터가 없습니다. 첫 주문(시작전 상태) 실행.")
 
-        progress_rate = computed.get("progress_rate", 0)
+        progress_rate_raw = computed.get("progress_rate", 0)
+        progress_rate = f"{progress_rate_raw * 100:.1f}%"
         holding_qty_from_db = computed.get("holding_qty", 0)
         logging.info(f"현재 진행률 : {progress_rate}")
 

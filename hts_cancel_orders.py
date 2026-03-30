@@ -18,10 +18,13 @@ AUTO_ID_PASSWORD_DIALOG_OK_BUTTON = "2"  # 비밀번호 입력 안내창 확인 
 
 # 미체결 탭 및 일괄취소 관련 상수
 TAB_TITLE_UNFILLED = "미체결"  # 미체결 탭 제목
-AUTO_ID_SELECT_ALL_CHECKBOX = "5015"  # 전체 선택 체크박스 automation_id
-AUTO_ID_BATCH_CANCEL_BUTTON = "5020"  # 일괄취소 버튼 automation_id
-AUTO_ID_CANCEL_CONFIRM_BUTTON = "3885"  # 취소 확인 팝업에서 '취소' 버튼 automation_id
-AUTO_ID_CLOSE_BUTTON = "3795"  # 팝업에서 '닫기' 버튼 automation_id
+AUTO_ID_BOTTOM_TAB = "3785"  # 하단 탭 컨트롤 automation_id (미체결/주문체결/주문가능 등)
+AUTO_ID_UNFILLED_GRID = "3780"  # 미체결 그리드 Pane automation_id (하단 탭 내부)
+SELECT_ALL_CHECKBOX_COORDS = (35, 12)  # 그리드 헤더 내 전체 선택 체크박스 상대 좌표
+AUTO_ID_BATCH_CANCEL_BUTTON = "3815"  # 일괄취소 버튼 automation_id (하단 탭 내부)
+CANCEL_CONFIRM_MODAL_TITLE = "해외주식 일괄 취소주문 확인창"  # 취소 확인 모달 제목 (Pane 타입)
+AUTO_ID_CANCEL_ORDER_BUTTON = "3840"  # 취소 확인 모달 - 취소주문 버튼 automation_id
+AUTO_ID_CANCEL_CLOSE_BUTTON = "3845"  # 취소 확인 모달 - 닫기 버튼 automation_id
 
 
 def hts_cancel_orders(selected_user, account_index, is_test_mode):
@@ -102,68 +105,65 @@ def hts_cancel_orders(selected_user, account_index, is_test_mode):
         # 잠시 대기 (미체결 데이터 로딩)
         time.sleep(2)
 
-        # 전체 선택 체크박스 클릭
-        logging.info("전체 선택 체크박스 찾는 중...")
-        select_all_checkbox = find_control_by_criteria(order_window, "CheckBox", automation_id=AUTO_ID_SELECT_ALL_CHECKBOX)
-        if select_all_checkbox:
-            select_all_checkbox.click_input()
+        # 하단 탭 컨트롤 찾기 (미체결/주문체결/주문가능 등이 있는 탭)
+        # order_window 전체에서 검색하면 동일 auto_id를 가진 다른 컨트롤이 먼저 잡히므로,
+        # 하단 탭 내부에서만 검색하여 정확한 컨트롤을 찾음
+        logging.info("하단 탭 컨트롤 찾는 중...")
+        bottom_tab = find_control_by_criteria(order_window, "Tab", automation_id=AUTO_ID_BOTTOM_TAB)
+        if not bottom_tab:
+            raise Exception("하단 탭 컨트롤을 찾을 수 없습니다.")
+
+        # 전체 선택 체크박스 클릭 (그리드 헤더의 전체선택 컬럼 상대좌표 클릭)
+        logging.info("전체 선택 체크박스 클릭 중...")
+        grid = find_control_by_criteria(bottom_tab, "Pane", automation_id=AUTO_ID_UNFILLED_GRID)
+        if grid:
+            grid_rect = grid.rectangle()
+            abs_x = grid_rect.left + SELECT_ALL_CHECKBOX_COORDS[0]
+            abs_y = grid_rect.top + SELECT_ALL_CHECKBOX_COORDS[1]
+            logging.info(f"그리드 위치: left={grid_rect.left}, top={grid_rect.top}, right={grid_rect.right}, bottom={grid_rect.bottom}")
+            logging.info(f"전체 선택 클릭 좌표: 상대=({SELECT_ALL_CHECKBOX_COORDS[0]}, {SELECT_ALL_CHECKBOX_COORDS[1]}), 절대=({abs_x}, {abs_y})")
+            grid.click_input(coords=SELECT_ALL_CHECKBOX_COORDS)
             logging.info("전체 선택 체크박스를 클릭하였습니다.")
         else:
-            # automation_id로 못 찾으면 텍스트로 시도
-            select_all_checkbox = find_control_by_criteria(order_window, "CheckBox", title="전체")
-            if select_all_checkbox:
-                select_all_checkbox.click_input()
-                logging.info("전체 선택 체크박스를 클릭하였습니다. (title로 찾음)")
-            else:
-                logging.warning("전체 선택 체크박스를 찾지 못했습니다. 미체결 주문이 없을 수 있습니다.")
+            logging.warning("미체결 그리드를 찾지 못했습니다. 미체결 주문이 없을 수 있습니다.")
 
-        # 일괄취소 버튼 클릭
+        # 일괄취소 버튼 클릭 (하단 탭 내부에서 검색)
         logging.info("일괄취소 버튼 찾는 중...")
-        batch_cancel_button = find_control_by_criteria(order_window, "Button", automation_id=AUTO_ID_BATCH_CANCEL_BUTTON)
+        batch_cancel_button = find_control_by_criteria(bottom_tab, "Button", automation_id=AUTO_ID_BATCH_CANCEL_BUTTON)
         if batch_cancel_button:
             batch_cancel_button.click_input()
             logging.info("일괄취소 버튼을 클릭하였습니다.")
         else:
-            # automation_id로 못 찾으면 텍스트로 시도
-            batch_cancel_button = find_control_by_criteria(order_window, "Button", title="일괄취소")
-            if batch_cancel_button:
-                batch_cancel_button.click_input()
-                logging.info("일괄취소 버튼을 클릭하였습니다. (title로 찾음)")
-            else:
-                logging.warning("일괄취소 버튼을 찾지 못했습니다.")
-                raise Exception("일괄취소 버튼을 찾을 수 없습니다.")
+            logging.warning("일괄취소 버튼을 찾지 못했습니다.")
+            raise Exception("일괄취소 버튼을 찾을 수 없습니다.")
 
-        # 취소 확인 팝업 처리
-        time.sleep(1)
-        
+        # 취소 확인 모달 처리 ("해외주식 일괄 취소주문 확인창")
+        # 모달은 Window가 아닌 Pane 타입이므로 find_control_by_criteria로 직접 검색
+        time.sleep(2)
+        logging.info("취소 확인 모달 찾는 중...")
+        cancel_modal = find_control_by_criteria(main_window, "Pane", title=CANCEL_CONFIRM_MODAL_TITLE)
+        if not cancel_modal:
+            raise Exception("취소 확인 모달을 찾을 수 없습니다.")
+        logging.info("취소 확인 모달을 찾았습니다.")
+
         if is_test_mode:
             # 테스트 모드: 닫기 버튼 클릭
-            logging.info("테스트 모드이므로 취소 확인 팝업에서 '닫기' 버튼을 찾는 중...")
-            close_button = find_control_by_criteria(main_window, "Button", automation_id=AUTO_ID_CLOSE_BUTTON)
+            logging.info("테스트 모드이므로 '닫기' 버튼을 찾는 중...")
+            close_button = find_control_by_criteria(cancel_modal, "Button", automation_id=AUTO_ID_CANCEL_CLOSE_BUTTON)
             if close_button:
                 close_button.click_input()
                 logging.info("'테스트 모드'이므로 '닫기' 버튼을 클릭했습니다.")
             else:
-                # 텍스트로 시도
-                close_button = find_control_by_criteria(main_window, "Button", title="닫기")
-                if close_button:
-                    close_button.click_input()
-                    logging.info("'테스트 모드'이므로 '닫기' 버튼을 클릭했습니다. (title로 찾음)")
+                logging.warning("'닫기' 버튼을 찾지 못했습니다.")
         else:
-            # 실제 모드: 취소 버튼 클릭
-            logging.info("취소 확인 팝업에서 '취소' 버튼을 찾는 중...")
-            cancel_confirm_button = find_control_by_criteria(main_window, "Button", automation_id=AUTO_ID_CANCEL_CONFIRM_BUTTON)
-            if cancel_confirm_button:
-                cancel_confirm_button.click_input()
-                logging.info("'실제 모드'이므로 '취소' 버튼을 클릭했습니다.")
+            # 실제 모드: 취소주문 버튼 클릭
+            logging.info("'취소주문' 버튼을 찾는 중...")
+            cancel_button = find_control_by_criteria(cancel_modal, "Button", automation_id=AUTO_ID_CANCEL_ORDER_BUTTON)
+            if cancel_button:
+                cancel_button.click_input()
+                logging.info("'취소주문' 버튼을 클릭했습니다.")
             else:
-                # 텍스트로 시도
-                cancel_confirm_button = find_control_by_criteria(main_window, "Button", title="취소")
-                if cancel_confirm_button:
-                    cancel_confirm_button.click_input()
-                    logging.info("'실제 모드'이므로 '취소' 버튼을 클릭했습니다. (title로 찾음)")
-                else:
-                    logging.warning("취소 확인 버튼을 찾지 못했습니다.")
+                logging.warning("'취소주문' 버튼을 찾지 못했습니다.")
                     
         order_window.close()
         logging.info("'해외주식 주문' 창을 닫았습니다.")            
