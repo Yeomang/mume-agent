@@ -1,0 +1,19 @@
+# Environment
+.env
+__pycache__/
+*.pyc
+
+# Data
+data/
+pids/
+log.log
+
+# Local config
+automation_targets.json
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store

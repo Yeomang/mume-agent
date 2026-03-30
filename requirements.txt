@@ -1,0 +1,27 @@
+# Web Framework (hts_agent.py)
+fastapi>=0.121.0
+uvicorn>=0.38.0
+
+# Data Processing
+pandas>=2.2.0
+numpy>=2.2.0
+
+# Windows Automation
+pywin32>=308
+pywinauto>=0.6.8
+
+# Environment & Secrets
+python-dotenv>=1.0.0
+keyring>=24.0.0
+
+# External APIs
+requests>=2.32.0
+httpx>=0.28.0
+yfinance>=0.2.50
+curl_cffi>=0.14.0
+
+# Market Calendar
+pandas-market-calendars>=4.6.0
+
+# Supabase
+supabase>=2.0.0
