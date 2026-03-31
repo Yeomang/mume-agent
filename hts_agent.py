@@ -1,5 +1,4 @@
 # hts_agent.py — HTS 자동화 전용 API 서버
-# 배포 파이프라인 테스트 v2 (2026-04-01)
 # 웹콘솔(mume-console)에서 프록시로 호출하는 경량 에이전트.
 # 실행: uvicorn hts_agent:app --host 0.0.0.0 --port 9000
 
@@ -19,6 +18,7 @@ import threading
 import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional
+import ssl
 from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import Body, FastAPI, HTTPException, Request
@@ -510,7 +510,12 @@ def _download_release(release_url: str, github_token: str, dest_path: str) -> No
             headers["Authorization"] = f"token {github_token}"
             headers["Accept"] = "application/octet-stream"
     req = UrlRequest(release_url, headers=headers)
-    with urlopen(req, timeout=120) as resp, open(dest_path, "wb") as f:
+    try:
+        import certifi
+        ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        ssl_ctx = ssl.create_default_context()
+    with urlopen(req, timeout=120, context=ssl_ctx) as resp, open(dest_path, "wb") as f:
         shutil.copyfileobj(resp, f)
 
 
