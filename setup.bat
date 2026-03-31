@@ -181,38 +181,38 @@ if %errorlevel% neq 0 (
     echo       [존재] MumeAgent_Startup
 )
 
-:: 아침 작업 (07:30)
+:: 아침 작업 (화수목금토 08:10)
 schtasks /query /tn "MumeAgent_Morning" >nul 2>&1
 if %errorlevel% neq 0 (
-    schtasks /create /tn "MumeAgent_Morning" /tr "\"%INSTALL_DIR%\main_morning.bat\"" /sc daily /st 07:30 /rl highest /f >nul
-    echo       [등록] MumeAgent_Morning (매일 07:30)
+    schtasks /create /tn "MumeAgent_Morning" /tr "\"%INSTALL_DIR%\main_morning.bat\"" /sc weekly /d TUE,WED,THU,FRI,SAT /st 08:10 /rl highest /f >nul
+    echo       [등록] MumeAgent_Morning (화수목금토 08:10)
 ) else (
     echo       [존재] MumeAgent_Morning
 )
 
-:: 저녁 작업 (22:30)
+:: 저녁 작업 (월화수목금 18:10)
 schtasks /query /tn "MumeAgent_Evening" >nul 2>&1
 if %errorlevel% neq 0 (
-    schtasks /create /tn "MumeAgent_Evening" /tr "\"%INSTALL_DIR%\main_evening.bat\"" /sc daily /st 22:30 /rl highest /f >nul
-    echo       [등록] MumeAgent_Evening (매일 22:30)
+    schtasks /create /tn "MumeAgent_Evening" /tr "\"%INSTALL_DIR%\main_evening.bat\"" /sc weekly /d MON,TUE,WED,THU,FRI /st 18:10 /rl highest /f >nul
+    echo       [등록] MumeAgent_Evening (월화수목금 18:10)
 ) else (
     echo       [존재] MumeAgent_Evening
 )
 
-:: 시간외 작업 (06:10)
+:: 시간외 작업 (화수목금토 06:10)
 schtasks /query /tn "MumeAgent_Aftermarket" >nul 2>&1
 if %errorlevel% neq 0 (
-    schtasks /create /tn "MumeAgent_Aftermarket" /tr "\"%INSTALL_DIR%\main_aftermarket.bat\"" /sc daily /st 06:10 /rl highest /f >nul
-    echo       [등록] MumeAgent_Aftermarket (매일 06:10)
+    schtasks /create /tn "MumeAgent_Aftermarket" /tr "\"%INSTALL_DIR%\main_aftermarket.bat\"" /sc weekly /d TUE,WED,THU,FRI,SAT /st 06:10 /rl highest /f >nul
+    echo       [등록] MumeAgent_Aftermarket (화수목금토 06:10)
 ) else (
     echo       [존재] MumeAgent_Aftermarket
 )
 
-:: 미체결 취소 작업 (23:50)
+:: 미체결 취소 작업 (월화수목금 23:50)
 schtasks /query /tn "MumeAgent_CancelOrders" >nul 2>&1
 if %errorlevel% neq 0 (
-    schtasks /create /tn "MumeAgent_CancelOrders" /tr "\"%INSTALL_DIR%\main_cancel_orders.bat\"" /sc daily /st 23:50 /rl highest /f >nul
-    echo       [등록] MumeAgent_CancelOrders (매일 23:50)
+    schtasks /create /tn "MumeAgent_CancelOrders" /tr "\"%INSTALL_DIR%\main_cancel_orders.bat\"" /sc weekly /d MON,TUE,WED,THU,FRI /st 23:50 /rl highest /f >nul
+    echo       [등록] MumeAgent_CancelOrders (월화수목금 23:50)
 ) else (
     echo       [존재] MumeAgent_CancelOrders
 )
@@ -231,10 +231,10 @@ echo   에이전트 포트: 9000
 echo.
 echo   스케줄:
 echo     - 에이전트 시작: 로그온 시 자동
-echo     - 시간외 매수:   매일 06:10
-echo     - 아침 체결수집: 매일 07:30
-echo     - 저녁 자동주문: 매일 22:30
-echo     - 미체결 취소:   매일 23:50
+echo     - 시간외 매수:   화수목금토 06:10
+echo     - 아침 체결수집: 화수목금토 08:10
+echo     - 저녁 자동주문: 월화수목금 18:10
+echo     - 미체결 취소:   월화수목금 23:50
 echo.
 echo   지금 에이전트를 시작하시겠습니까?
 set /p START_NOW="  (Y/N): "
