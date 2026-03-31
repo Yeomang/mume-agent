@@ -50,7 +50,7 @@ jobs:
       - name: Notify mume-console for auto-deploy
         if: vars.CONSOLE_WEBHOOK_URL != ''
         run: |
-          curl -X POST "${{ vars.CONSOLE_WEBHOOK_URL }}/api/deploy/trigger" \
+          curl -L -X POST "${{ vars.CONSOLE_WEBHOOK_URL }}/api/deploy/trigger" \
             -H "Content-Type: application/json" \
             -H "X-Webhook-Secret: ${{ secrets.CONSOLE_WEBHOOK_SECRET }}" \
             -d '{
