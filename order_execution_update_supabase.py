@@ -46,7 +46,7 @@ def _trigger_recompute(cycle_id: int):
     headers = {"X-Agent-Key": agent_key} if agent_key else {}
     try:
         resp = httpx.post(
-            f"{console_url}/api/automation/recompute/{cycle_id}",
+            f"{console_url}/recompute/{cycle_id}",
             headers=headers,
             timeout=60.0,
         )
