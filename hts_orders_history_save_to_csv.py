@@ -56,8 +56,8 @@ def save_orders_history(selected_user, account_index):
     send_keys(f"{{PGUP}}{{DOWN {account_index}}}{{ENTER}}")
     logging.info(f"{selected_user}님의 {account_index}번째 계좌번호를 선택하였습니다.")
 
-    # 비밀번호 입력 안내창 처리
-    dialog = wait_for_window("비밀번호 입력 안내창", main_window, "Meritz", "Window", timeout=3)
+    # 비밀번호 입력 안내창 처리 (parent의 자식 창에서 먼저 찾도록 title을 구체적으로 지정)
+    dialog = wait_for_window("비밀번호 입력 안내창", main_window, "비밀번호", "Window", timeout=3)
     if dialog:
         logging.info(f"확인 버튼 찾는 중...")
         ok_button = find_control_by_criteria(dialog, "Button", automation_id=AUTO_ID_PASSWORD_DIALOG_OK_BUTTON)

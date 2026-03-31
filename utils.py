@@ -157,21 +157,29 @@ def block_input(state=True):
         logging.info("(입력 잠금 해제)마우스 및 키보드 잠금이 해제되었습니다.")
 
 
-def find_control_by_criteria(parent, control_type, automation_id=None, title=None, index=0):
+def find_control_by_criteria(parent, control_type, automation_id=None, title=None, index=0, retries=3, delay=1):
     """특정 기준에 따라 하위 컨트롤을 찾습니다."""
-    time.sleep(3)
-    controls = [
-        ctrl for ctrl in parent.descendants()
-        if ctrl.element_info.control_type == control_type
-        and (automation_id is None or ctrl.element_info.automation_id == automation_id)
-        and (title is None or ctrl.element_info.name == title)
-    ]    
-    if len(controls) > index:
-        logging.info(f"하위 컨트롤 중 control_type='{control_type}', automation_id='{automation_id}', title='{title}' 인 것 중 '{index+1}'번째 컨트롤을 찾았습니다.")
-        return controls[index]
-    else:
-        logging.warning(f"컨트롤을 찾지 못했습니다: control_type='{control_type}', automation_id='{automation_id}', title='{title}', index={index}")
-        return None
+    time.sleep(delay)
+    for attempt in range(retries):
+        try:
+            controls = [
+                ctrl for ctrl in parent.descendants()
+                if ctrl.element_info.control_type == control_type
+                and (automation_id is None or ctrl.element_info.automation_id == automation_id)
+                and (title is None or ctrl.element_info.name == title)
+            ]
+            if len(controls) > index:
+                logging.info(f"하위 컨트롤 중 control_type='{control_type}', automation_id='{automation_id}', title='{title}' 인 것 중 '{index+1}'번째 컨트롤을 찾았습니다.")
+                return controls[index]
+            else:
+                logging.warning(f"컨트롤을 찾지 못했습니다: control_type='{control_type}', automation_id='{automation_id}', title='{title}', index={index}")
+                return None
+        except Exception as e:
+            logging.warning(f"컨트롤 탐색 중 오류 발생 (시도 {attempt+1}/{retries}): {e}")
+            if attempt < retries - 1:
+                time.sleep(1)
+    logging.error(f"컨트롤 탐색 실패 (최대 재시도 초과): control_type='{control_type}', automation_id='{automation_id}', title='{title}'")
+    return None
 
 
 def set_focus_and_type(control, text):
