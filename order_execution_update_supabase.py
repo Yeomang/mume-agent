@@ -38,7 +38,7 @@ def _get_active_cycles(sb, selected_user, account_index, cycles=None):
 
 def _trigger_recompute(cycle_id: int):
     """콘솔 API를 호출하여 recompute를 트리거한다."""
-    console_url = Config.CONSOLE_URL
+    console_url = Config.CONSOLE_URL.rstrip("/")
     agent_key = Config.HTS_AGENT_KEY
     if not console_url:
         logging.warning("[recompute] CONSOLE_URL이 설정되지 않아 recompute를 트리거할 수 없습니다.")
