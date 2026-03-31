@@ -1,4 +1,4 @@
-# hts_agent.py — HTS 자동화 전용 API 서버 (v2025.04.01)
+# hts_agent.py — HTS 자동화 전용 API 서버 (v2026.04.01)
 # 웹콘솔(mume-console)에서 프록시로 호출하는 경량 에이전트.
 # 실행: uvicorn hts_agent:app --host 0.0.0.0 --port 9000
 
