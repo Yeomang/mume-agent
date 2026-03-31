@@ -208,15 +208,6 @@ if %errorlevel% neq 0 (
     echo       [존재] MumeAgent_Aftermarket
 )
 
-:: 미체결 취소 작업 (월화수목금 23:50)
-schtasks /query /tn "MumeAgent_CancelOrders" >nul 2>&1
-if %errorlevel% neq 0 (
-    schtasks /create /tn "MumeAgent_CancelOrders" /tr "\"%INSTALL_DIR%\main_cancel_orders.bat\"" /sc weekly /d MON,TUE,WED,THU,FRI /st 23:50 /rl highest /f >nul
-    echo       [등록] MumeAgent_CancelOrders (월화수목금 23:50)
-) else (
-    echo       [존재] MumeAgent_CancelOrders
-)
-
 echo.
 
 :: ─────────────────────────────────────
@@ -234,7 +225,7 @@ echo     - 에이전트 시작: 로그온 시 자동
 echo     - 시간외 매수:   화수목금토 06:10
 echo     - 아침 체결수집: 화수목금토 08:10
 echo     - 저녁 자동주문: 월화수목금 18:10
-echo     - 미체결 취소:   월화수목금 23:50
+echo     - 미체결 취소:   웹콘솔에서 수동 실행
 echo.
 echo   지금 에이전트를 시작하시겠습니까?
 set /p START_NOW="  (Y/N): "
