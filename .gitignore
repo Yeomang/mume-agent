@@ -10,6 +10,7 @@ log.log
 
 # Local config
 automation_targets.json
+deploy_info.json
 
 # IDE
 .vscode/

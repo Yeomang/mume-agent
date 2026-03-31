@@ -49,6 +49,8 @@ pip install -r requirements.txt
 | GET | `/password-status?users=<csv>` | 비밀번호 설정 여부 확인 |
 | POST | `/update-passwords` | 비밀번호 저장 (Windows Credential Manager) |
 | POST | `/delete-passwords` | 비밀번호 삭제 |
+| POST | `/deploy` | 원격 배포 (GitHub Release zip 다운로드 & 적용) |
+| GET | `/deploy-status` | 현재 배포 버전 정보 조회 |
 
 모든 엔드포인트는 `X-Agent-Key` 헤더로 인증. `/run`은 subprocess를 생성하며, `JOB_NAME`, `JOB_USER_ACCOUNTS`, `JOB_TEST_MODE`, `JOB_DATE_FROM`, `JOB_DATE_TO` 환경변수를 전달.
 
@@ -148,6 +150,15 @@ log.log                             # 애플리케이션 로그
 **에러 복구**: finally 블록에서 반드시 `block_input(False)` 호출. 예외 발생 시에도 마우스/키보드 잠금 해제.
 
 **텔레그램 알림**: 주문 실행 결과를 실시간으로 텔레그램에 전송.
+
+### 배포 파이프라인
+```
+git push main → GitHub Actions → Release zip 생성 → webhook → mume-console → 각 서버 POST /deploy → zip 다운로드 & 적용
+```
+- `setup.bat` — 윈도우 서버 원클릭 설치 스크립트 (Python, 가상환경, 의존성, .env, 방화벽, 스케줄러 모두 자동 설정)
+- `.github/workflows/release-deploy.yml` — push 시 자동 Release 생성 + 콘솔 webhook 트리거
+- `POST /deploy` — 에이전트가 Release zip을 다운로드하여 .py/.bat 파일만 업데이트
+- `hts_agent.bat` — 무한루프 래퍼. 에이전트 프로세스 종료 시 자동 재시작
 
 ### 크로스 플랫폼 참고사항
 코드는 macOS에서 import/편집 가능하도록 `platform.system() == "Windows"` 분기 처리가 되어 있으나, **실제 GUI 자동화 실행은 Windows 전용**. `pywinauto`, `win32gui`, `block_input(ctypes.windll)` 등은 Windows에서만 동작.

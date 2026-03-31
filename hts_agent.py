@@ -6,14 +6,19 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
+import hashlib
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
+import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional
+from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -453,3 +458,209 @@ def delete_passwords(payload: dict = Body(...)):
 
     write_log("DELETE_PASSWORD", "config", f"user={user}, deleted={','.join(deleted) or 'none'}")
     return {"message": "비밀번호가 삭제되었습니다.", "deleted": deleted}
+
+
+# ─────────────────────────────────────
+# 배포 (Deploy)
+# ─────────────────────────────────────
+DEPLOY_INFO_FILE = BASE_DIR / "deploy_info.json"
+
+# 배포 시 덮어쓸 파일 확장자
+DEPLOY_EXTENSIONS = {".py", ".bat"}
+
+# 절대 덮어쓰지 않을 파일/디렉터리
+DEPLOY_EXCLUDE = {
+    ".env", "automation_targets.json", "deploy_info.json",
+    "data", "pids", "log.log", ".venv", "__pycache__",
+    ".git", ".github", ".claude",
+}
+
+
+def _file_hash(path: str) -> str | None:
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except FileNotFoundError:
+        return None
+
+
+def _check_running_jobs() -> list[str]:
+    running = []
+    with PROC_LOCK:
+        for job in JOB_CONFIG:
+            _update_status_from_proc(job)
+            if CURRENT_PROC[job] is not None:
+                running.append(job)
+    return running
+
+
+def _download_release(release_url: str, github_token: str, dest_path: str) -> None:
+    headers = {}
+    if github_token:
+        # Private repo: GitHub API 경유
+        api_url = release_url
+        if "api.github.com" not in release_url:
+            # 일반 URL -> API URL 변환은 콘솔에서 처리하므로 직접 다운로드 시도
+            headers["Authorization"] = f"token {github_token}"
+        else:
+            headers["Authorization"] = f"token {github_token}"
+            headers["Accept"] = "application/octet-stream"
+    req = UrlRequest(release_url, headers=headers)
+    with urlopen(req, timeout=120) as resp, open(dest_path, "wb") as f:
+        shutil.copyfileobj(resp, f)
+
+
+def _run_pip_install() -> str:
+    venv_pip = BASE_DIR / ".venv" / "Scripts" / "pip.exe"
+    pip_cmd = str(venv_pip) if venv_pip.exists() else sys.executable + " -m pip"
+    try:
+        result = subprocess.run(
+            [str(venv_pip) if venv_pip.exists() else sys.executable, "-m", "pip",
+             "install", "-r", str(BASE_DIR / "requirements.txt"),
+             "--quiet", "--disable-pip-version-check"],
+            capture_output=True, text=True, timeout=180,
+            cwd=str(BASE_DIR),
+        )
+        if result.returncode != 0:
+            return f"실패: {result.stderr[:500]}"
+        return "성공"
+    except Exception as e:
+        return f"오류: {e}"
+
+
+def _execute_deploy(release_url: str, github_token: str = "") -> dict:
+    tmp_dir = tempfile.mkdtemp(prefix="mume_deploy_")
+    zip_path = os.path.join(tmp_dir, "release.zip")
+    extract_dir = os.path.join(tmp_dir, "extracted")
+
+    try:
+        # 1) zip 다운로드
+        _download_release(release_url, github_token, zip_path)
+
+        # 2) 압축 해제
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(extract_dir)
+
+        # 3) 파일 비교 & 덮어쓰기
+        updated_files = []
+        requirements_changed = False
+        agent_changed = False
+
+        for root, dirs, files in os.walk(extract_dir):
+            # 제외 디렉터리 스킵
+            dirs[:] = [d for d in dirs if d not in DEPLOY_EXCLUDE]
+
+            rel_root = os.path.relpath(root, extract_dir)
+            for fname in files:
+                rel_path = os.path.join(rel_root, fname) if rel_root != "." else fname
+
+                # 제외 대상 체크
+                top_level = rel_path.split(os.sep)[0]
+                if top_level in DEPLOY_EXCLUDE:
+                    continue
+
+                # 확장자 또는 특정 파일 체크
+                ext = Path(fname).suffix
+                is_deployable = ext in DEPLOY_EXTENSIONS or fname == "requirements.txt"
+                if not is_deployable:
+                    continue
+
+                src = os.path.join(root, fname)
+                dst = BASE_DIR / rel_path
+
+                # 내용 비교
+                src_hash = _file_hash(src)
+                dst_hash = _file_hash(str(dst)) if dst.exists() else None
+
+                if src_hash != dst_hash:
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, dst)
+                    updated_files.append(rel_path)
+
+                    if fname == "requirements.txt":
+                        requirements_changed = True
+                    if fname == "hts_agent.py":
+                        agent_changed = True
+
+        # 4) requirements.txt 변경 시 pip install
+        pip_result = None
+        if requirements_changed:
+            pip_result = _run_pip_install()
+
+        # 5) 배포 정보 저장
+        deploy_info = {
+            "deployed_at": dt.datetime.now().isoformat(timespec="seconds"),
+            "updated_files": updated_files,
+            "release_url": release_url,
+        }
+        try:
+            DEPLOY_INFO_FILE.write_text(
+                json.dumps(deploy_info, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+        # 6) hts_agent.py 변경 시 재시작 예약
+        restart_scheduled = False
+        if agent_changed and platform.system() == "Windows":
+            restart_scheduled = True
+            threading.Thread(target=_delayed_restart, daemon=True).start()
+
+        return {
+            "updated_files": updated_files,
+            "requirements_changed": requirements_changed,
+            "pip_result": pip_result,
+            "restart_scheduled": restart_scheduled,
+        }
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _delayed_restart():
+    """응답 전송 후 3초 뒤에 프로세스를 종료. hts_agent.bat 래퍼가 자동 재시작."""
+    import time
+    time.sleep(3)
+    write_log("DEPLOY_RESTART", "deploy", "에이전트 재시작 (hts_agent.bat 래퍼가 자동 재실행)")
+    os._exit(0)
+
+
+@app.post("/deploy")
+def deploy(payload: dict = Body(...)):
+    release_url: str = payload.get("release_url", "")
+    sha: str = payload.get("sha", "")
+    github_token: str = payload.get("github_token", "")
+
+    if not release_url:
+        raise HTTPException(status_code=400, detail="release_url은 필수입니다.")
+
+    # 실행 중인 작업이 있으면 배포 거부
+    running_jobs = _check_running_jobs()
+    if running_jobs:
+        raise HTTPException(
+            status_code=409,
+            detail=f"실행 중인 작업이 있어 배포할 수 없습니다: {', '.join(running_jobs)}"
+        )
+
+    write_log("DEPLOY_START", "deploy", f"sha={sha}, url={release_url}")
+
+    try:
+        result = _execute_deploy(release_url, github_token)
+        write_log("DEPLOY_SUCCESS", "deploy", json.dumps(result, ensure_ascii=False))
+        return {"status": "ok", **result}
+    except Exception as e:
+        write_log("DEPLOY_ERROR", "deploy", str(e))
+        raise HTTPException(status_code=500, detail=f"배포 실패: {e}")
+
+
+@app.get("/deploy-status")
+def deploy_status():
+    if not DEPLOY_INFO_FILE.exists():
+        return {"deployed_at": None, "message": "배포 이력이 없습니다."}
+    try:
+        data = json.loads(DEPLOY_INFO_FILE.read_text(encoding="utf-8"))
+        return data
+    except Exception:
+        return {"deployed_at": None, "message": "배포 정보를 읽을 수 없습니다."}
