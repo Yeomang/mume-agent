@@ -93,7 +93,6 @@ def hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_i
         
         
         # 반복문을 사용해 buy_orders 리스트 내의 모든 주문을 실행
-        from pywinauto import Desktop
         failed_orders = []
         for order in buy_orders:
             quantity = order["quantity"]
@@ -130,22 +129,28 @@ def hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_i
                     logging.info("'실제 모드'이므로 '매수' 버튼을 클릭했습니다.")
 
             # 매수 확인 버튼 클릭 후 "주문가능금액이 부족합니다" 등 안내 모달 체크
-            time.sleep(1)
-            alert_modal = find_control_by_criteria(main_window, "Window", title="안내", delay=0, silent=True)
+            # wait_for_window의 4단계 검색 사용 (win32gui + Desktop Window/Dialog + 자식 창)
+            alert_modal = wait_for_window("안내", main_window, "안내", "Window", timeout=2)
             if alert_modal:
                 alert_text = ""
                 try:
                     for ctrl in alert_modal.descendants():
                         if ctrl.element_info.control_type == "Text":
-                            alert_text = ctrl.element_info.name or ""
-                            break
+                            t = ctrl.element_info.name or ""
+                            if t and t != "안내":
+                                alert_text = t
+                                break
                 except Exception:
                     pass
                 logging.warning(f"주문 실패 ({alert_text}): ${price} x {quantity}주 — 다음 주문으로 계속 진행")
                 failed_orders.append({"quantity": quantity, "price": price, "reason": alert_text})
-                ok_btn = find_control_by_criteria(alert_modal, "Button", title="확인", delay=0, silent=True)
+                # 확인 버튼: automation_id="2" 또는 title="확인" 시도
+                ok_btn = find_control_by_criteria(alert_modal, "Button", automation_id="2", delay=0, silent=True)
+                if not ok_btn:
+                    ok_btn = find_control_by_criteria(alert_modal, "Button", title="확인", delay=0, silent=True)
                 if ok_btn:
                     ok_btn.click_input()
+                    logging.info("안내 모달의 확인 버튼을 클릭하였습니다.")
                 continue  # 다음 주문으로 계속 진행
 
         # 실패한 주문이 있으면 텔레그램 알림
