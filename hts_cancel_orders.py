@@ -137,11 +137,27 @@ def hts_cancel_orders(selected_user, account_index, is_test_mode):
             logging.warning("일괄취소 버튼을 찾지 못했습니다.")
             raise Exception("일괄취소 버튼을 찾을 수 없습니다.")
 
-        # 취소 확인 모달 처리 ("해외주식 일괄 취소주문 확인창")
-        # 모달은 Window가 아닌 Pane 타입이므로 find_control_by_criteria로 직접 검색
+        # 일괄취소 버튼 클릭 후 모달 처리
+        # 1) 미체결 주문이 없으면 "종목확인" 모달 ("일괄취소할 종목을 체크하여 주십시오")
+        # 2) 미체결 주문이 있으면 "해외주식 일괄 취소주문 확인창" 모달
         time.sleep(2)
+        logging.info("모달 확인 중...")
+
+        # 먼저 "종목확인" 모달 체크 (미체결 주문 없음)
+        no_order_modal = find_control_by_criteria(main_window, "Window", title="종목확인", delay=0)
+        if no_order_modal:
+            logging.info("미체결 주문이 없습니다. '종목확인' 모달의 확인 버튼을 클릭합니다.")
+            ok_btn = find_control_by_criteria(no_order_modal, "Button", automation_id="2", delay=0)
+            if ok_btn:
+                ok_btn.click_input()
+            order_window.close()
+            logging.info("'해외주식 주문' 창을 닫았습니다.")
+            logging.info(">>>>> 미체결 주문 없음 — 일괄 취소 건너뜀 <<<<<")
+            return True, "미체결 주문 없음"
+
+        # "해외주식 일괄 취소주문 확인창" 모달 처리
         logging.info("취소 확인 모달 찾는 중...")
-        cancel_modal = find_control_by_criteria(main_window, "Pane", title=CANCEL_CONFIRM_MODAL_TITLE)
+        cancel_modal = find_control_by_criteria(main_window, "Pane", title=CANCEL_CONFIRM_MODAL_TITLE, delay=0)
         if not cancel_modal:
             raise Exception("취소 확인 모달을 찾을 수 없습니다.")
         logging.info("취소 확인 모달을 찾았습니다.")
