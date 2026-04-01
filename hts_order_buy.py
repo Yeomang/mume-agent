@@ -131,34 +131,22 @@ def hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_i
 
             # 매수 확인 버튼 클릭 후 "주문가능금액이 부족합니다" 등 안내 모달 체크
             time.sleep(1)
-            try:
-                desktop = Desktop(backend="uia")
-                alert_modal = None
-                for ctype in ["Window", "Dialog"]:
-                    try:
-                        m = desktop.window(title="안내", control_type=ctype)
-                        if m.exists(timeout=1):
-                            alert_modal = m
+            alert_modal = find_control_by_criteria(main_window, "Window", title="안내", delay=0, silent=True)
+            if alert_modal:
+                alert_text = ""
+                try:
+                    for ctrl in alert_modal.descendants():
+                        if ctrl.element_info.control_type == "Text":
+                            alert_text = ctrl.element_info.name or ""
                             break
-                    except Exception:
-                        pass
-                if alert_modal:
-                    alert_text = ""
-                    try:
-                        for ctrl in alert_modal.descendants():
-                            if ctrl.element_info.control_type == "Text":
-                                alert_text = ctrl.element_info.name or ""
-                                break
-                    except Exception:
-                        pass
-                    logging.warning(f"주문 실패 ({alert_text}): ${price} x {quantity}주 — 다음 주문으로 계속 진행")
-                    failed_orders.append({"quantity": quantity, "price": price, "reason": alert_text})
-                    ok_btn = find_control_by_criteria(alert_modal, "Button", title="확인", delay=0, silent=True)
-                    if ok_btn:
-                        ok_btn.click_input()
-                    continue  # 다음 주문으로 계속 진행
-            except Exception:
-                pass
+                except Exception:
+                    pass
+                logging.warning(f"주문 실패 ({alert_text}): ${price} x {quantity}주 — 다음 주문으로 계속 진행")
+                failed_orders.append({"quantity": quantity, "price": price, "reason": alert_text})
+                ok_btn = find_control_by_criteria(alert_modal, "Button", title="확인", delay=0, silent=True)
+                if ok_btn:
+                    ok_btn.click_input()
+                continue  # 다음 주문으로 계속 진행
 
         # 실패한 주문이 있으면 텔레그램 알림
         if failed_orders:
