@@ -17,16 +17,18 @@ TELEGRAM_BOT_TOKEN = Config.TELEGRAM_BOT_TOKEN_EXECUTION
 TELEGRAM_CHAT_ID = Config.TELEGRAM_CHAT_ID
 
 
-def _get_active_cycles(sb, selected_user, account_index, cycles=None):
+def _get_active_cycles(sb, selected_user, account_index, auth_user_ids=None, cycles=None):
     """cycle_master에서 활성 사이클 목록 조회"""
+    from automation_target_store import get_auth_user_ids
+    uids = auth_user_ids or get_auth_user_ids()
     res = supabase_fetch_all(
         lambda s, e: sb.table("cycle_master")
         .select("id, cycle_seq, status, method, stock_code")
         .in_("status", ["진행중", "시작전"])
+        .in_("auth_user_id", uids)
         .eq("user_name", selected_user)
         .eq("account_index", account_index)
         .eq("broker", "메리츠")
-        .not_.is_("account_id", "null")
         .order("cycle_seq", desc=False)
         .range(s, e)
         .execute()

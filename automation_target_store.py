@@ -23,12 +23,16 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Tuple
 
+# 모듈 레벨에서 auth_user_id 목록 캐시
+_cached_auth_user_ids: List[str] = []
+
 
 def _load_from_supabase() -> Dict[str, List[int]] | None:
     """
     Supabase user_accounts 테이블에서 is_automation_target=true인 계좌를 조회.
     조회 실패 시 None을 반환.
     """
+    global _cached_auth_user_ids
     try:
         from supabase_client import get_supabase_client
 
@@ -38,7 +42,7 @@ def _load_from_supabase() -> Dict[str, List[int]] | None:
 
         res = (
             sb.table("user_accounts")
-            .select("user_name,account_index")
+            .select("auth_user_id,user_name,account_index")
             .eq("is_automation_target", True)
             .execute()
         )
@@ -47,6 +51,7 @@ def _load_from_supabase() -> Dict[str, List[int]] | None:
             return None
 
         merged: Dict[str, List[int]] = {}
+        auth_user_ids: set = set()
         for row in rows:
             name = (row.get("user_name") or "").strip()
             if not name:
@@ -59,10 +64,20 @@ def _load_from_supabase() -> Dict[str, List[int]] | None:
                 merged[name] = []
             if acc not in merged[name]:
                 merged[name].append(acc)
+            uid = row.get("auth_user_id")
+            if uid:
+                auth_user_ids.add(uid)
+
+        _cached_auth_user_ids = list(auth_user_ids)
         return merged if merged else None
     except Exception as e:
         logging.warning(f"[automation_target] Supabase 조회 실패: {e}")
         return None
+
+
+def get_auth_user_ids() -> List[str]:
+    """자동 실행 대상에서 조회된 auth_user_id 목록을 반환."""
+    return _cached_auth_user_ids
 
 
 def load_automation_target(
