@@ -290,6 +290,7 @@ def run_job(
             [sys.executable, str(script_path)],
             cwd=str(BASE_DIR),
             env=env,
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
         )
         LAST_STATUS[job] = {"status": "running", "finished_at": None, "returncode": None}
         pid = CURRENT_PROC[job].pid if CURRENT_PROC[job] else "-"
