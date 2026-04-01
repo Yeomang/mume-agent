@@ -285,13 +285,19 @@ def _handle_password_dialog(main_window, password):
             logging.info("비밀번호를 입력하였습니다.")
 
             # 비밀번호 오류 모달 체크 ("비밀번호를 확인후 다시 입력하십시오")
+            # 메인 "iMeritz" 창이 아닌 정확히 "Meritz" 제목의 별도 모달만 찾음
             time.sleep(1)
-            pw_error = wait_for_window("비밀번호 오류 확인", main_window, "Meritz", "Window", timeout=2)
-            if pw_error:
-                err_ok = find_control_by_criteria(pw_error, "Button", title="확인", silent=True)
-                if err_ok:
-                    err_ok.click_input()
-                    logging.info("비밀번호 오류 안내 모달의 확인 버튼을 클릭하였습니다.")
+            from pywinauto import Desktop
+            try:
+                desktop = Desktop(backend="uia")
+                pw_error = desktop.window(title="Meritz", control_type="Window")
+                if pw_error.exists(timeout=1):
+                    err_ok = find_control_by_criteria(pw_error, "Button", title="확인", silent=True, delay=0)
+                    if err_ok:
+                        err_ok.click_input()
+                        logging.info("비밀번호 오류 안내 모달의 확인 버튼을 클릭하였습니다.")
+            except Exception:
+                pass
         else:
             logging.info("비밀번호 입력 안내창 없음 (이미 인증된 상태)")
     else:

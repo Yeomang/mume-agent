@@ -1,4 +1,4 @@
-from utils import setup_window, find_control_by_criteria, set_focus_and_type, wait_for_window, block_input, _handle_password_dialog
+from utils import setup_window, find_control_by_criteria, set_focus_and_type, wait_for_window, block_input, _handle_password_dialog, send_telegram_message
 from secrets_manager import get_account_password
 from config import Config
 from pywinauto import Application
@@ -125,9 +125,41 @@ def hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_i
                 if buy_button:
                     buy_button.click_input()
                     logging.info("'실제 모드'이므로 '매수' 버튼을 클릭했습니다.")
-                    
+
+            # "주문가능금액이 부족합니다" 등 안내 모달 체크
+            time.sleep(0.5)
+            from pywinauto import Desktop
+            try:
+                alert_modal = Desktop(backend="uia").window(title="안내", control_type="Window")
+                if alert_modal.exists(timeout=1):
+                    alert_text = ""
+                    try:
+                        for ctrl in alert_modal.descendants():
+                            if ctrl.element_info.control_type == "Text":
+                                alert_text = ctrl.element_info.name or ""
+                                break
+                    except Exception:
+                        pass
+                    logging.error(f"주문 실패 안내: {alert_text}")
+                    # 확인 버튼 클릭
+                    ok_btn = find_control_by_criteria(alert_modal, "Button", title="확인", delay=0, silent=True)
+                    if ok_btn:
+                        ok_btn.click_input()
+                    # 텔레그램 알림
+                    try:
+                        tg_msg = f"⚠️ [{selected_user} | {account_index}번 계좌] 매수 주문 실패\n{ticker} ${price} x {quantity}주\n사유: {alert_text}"
+                        send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, tg_msg)
+                    except Exception:
+                        pass
+                    # 나머지 주문 중단
+                    order_window.close()
+                    logging.info("'해외주식 주문' 창을 닫았습니다.")
+                    return False, alert_text
+            except Exception:
+                pass
+
         order_window.close()
-        logging.info("'해외주식 주문' 창을 닫았습니다.")            
+        logging.info("'해외주식 주문' 창을 닫았습니다.")
         logging.info(">>>>> 매수 주문 완료! <<<<<")
         # 주문 성공 시 True 반환
         return True, ""
