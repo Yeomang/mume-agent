@@ -91,7 +91,7 @@ def orders_execution_update_supabase(
         logging.error("Supabase 클라이언트를 초기화할 수 없습니다.")
         return
 
-    active_cycles = _get_active_cycles(sb, selected_user, account_index, cycles)
+    active_cycles = _get_active_cycles(sb, selected_user, account_index, cycles=cycles)
     logging.info(f"| 사용자 '{selected_user}' | HTS계좌순번 '{account_index}' | 활성 사이클: {[c['cycle_seq'] for c in active_cycles]}")
 
     for iternum, cycle in enumerate(active_cycles, start=1):
