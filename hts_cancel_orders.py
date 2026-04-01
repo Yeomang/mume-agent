@@ -135,7 +135,7 @@ def hts_cancel_orders(selected_user, account_index, is_test_mode):
         logging.info("모달 확인 중...")
 
         # 먼저 "종목확인" 모달 체크 (미체결 주문 없음)
-        no_order_modal = find_control_by_criteria(main_window, "Window", title="종목확인", delay=0)
+        no_order_modal = find_control_by_criteria(main_window, "Window", title="종목확인", delay=0, silent=True)
         if no_order_modal:
             logging.info("미체결 주문이 없습니다. '종목확인' 모달의 확인 버튼을 클릭합니다.")
             ok_btn = find_control_by_criteria(no_order_modal, "Button", automation_id="2", delay=0)
