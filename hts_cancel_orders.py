@@ -168,10 +168,16 @@ def hts_cancel_orders(selected_user, account_index, is_test_mode):
             cancel_button = find_control_by_criteria(cancel_modal, "Button", automation_id=AUTO_ID_CANCEL_ORDER_BUTTON)
             if cancel_button:
                 cancel_button.click_input()
-                logging.info("'취소주문' 버튼을 클릭했습니다.")
+                logging.info("'취소주문' 버튼을 클릭했습니다. 주문 취소 처리 대기 중...")
+                time.sleep(10)
+                # 취소 처리 완료 후 확인창 닫기
+                close_button = find_control_by_criteria(cancel_modal, "Button", automation_id=AUTO_ID_CANCEL_CLOSE_BUTTON, silent=True)
+                if close_button:
+                    close_button.click_input()
+                    logging.info("취소 확인창의 '닫기' 버튼을 클릭했습니다.")
             else:
                 logging.warning("'취소주문' 버튼을 찾지 못했습니다.")
-                    
+
         order_window.close()
         logging.info("'해외주식 주문' 창을 닫았습니다.")            
         logging.info(">>>>> 미체결 주문 일괄 취소 완료! <<<<<")
