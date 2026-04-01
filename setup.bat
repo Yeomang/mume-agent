@@ -19,10 +19,11 @@ if %errorlevel% neq 0 (
 )
 
 set INSTALL_DIR=C:\mume-agent
-set RELEASE_URL=https://github.com/Yeomang/mume-agent/releases/download/latest/mume-agent.zip
-set PYTHON_VERSION=3.12.8
+set RELEASE_URL=https://github.com/Yeomang/mume-agent/releases/download/current/mume-agent.zip
+set PYTHON_VERSION=3.10.7
 set PYTHON_INSTALLER=python-%PYTHON_VERSION%-amd64.exe
 set PYTHON_URL=https://www.python.org/ftp/python/%PYTHON_VERSION%/%PYTHON_INSTALLER%
+set PYTHON_DL_PATH=%TEMP%\%PYTHON_INSTALLER%
 
 :: ─────────────────────────────────────
 :: 1) Python 설치 확인
@@ -30,32 +31,77 @@ set PYTHON_URL=https://www.python.org/ftp/python/%PYTHON_VERSION%/%PYTHON_INSTAL
 echo [1/7] Python 설치 확인 중...
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
-    echo       Python이 설치되어 있지 않습니다. 자동 설치합니다...
-    echo       다운로드 중: %PYTHON_URL%
+    echo       Python이 설치되어 있지 않습니다. 다운로드 중...
+    echo.
 
-    curl.exe -6 -sL -o "%TEMP%\%PYTHON_INSTALLER%" "%PYTHON_URL%"
-    if not exist "%TEMP%\%PYTHON_INSTALLER%" (
-        echo [오류] Python 다운로드 실패. 인터넷 연결을 확인해주세요.
-        pause
-        exit /b 1
+    :: --- 방법 1: curl ---
+    curl.exe --connect-timeout 15 --max-time 300 -sL -o "%PYTHON_DL_PATH%" "%PYTHON_URL%" 2>nul
+    if exist "%PYTHON_DL_PATH%" (
+        for %%A in ("%PYTHON_DL_PATH%") do if %%~zA GTR 1000 goto :python_install
+        del "%PYTHON_DL_PATH%" >nul 2>&1
     )
+    echo       [1/3] curl 다운로드 실패. PowerShell 시도 중...
 
-    echo       Python 설치 중 (PATH 자동 등록)...
-    "%TEMP%\%PYTHON_INSTALLER%" /quiet InstallAllUsers=1 PrependPath=1 Include_pip=1
-    if %errorlevel% neq 0 (
-        echo [오류] Python 설치 실패.
-        pause
-        exit /b 1
+    :: --- 방법 2: PowerShell ---
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; (New-Object Net.WebClient).DownloadFile('%PYTHON_URL%','%PYTHON_DL_PATH%')" 2>nul
+    if exist "%PYTHON_DL_PATH%" (
+        for %%A in ("%PYTHON_DL_PATH%") do if %%~zA GTR 1000 goto :python_install
+        del "%PYTHON_DL_PATH%" >nul 2>&1
     )
+    echo       [2/3] PowerShell 다운로드 실패. bitsadmin 시도 중...
 
-    :: PATH 갱신
-    set "PATH=C:\Program Files\Python312;C:\Program Files\Python312\Scripts;%PATH%"
-    del "%TEMP%\%PYTHON_INSTALLER%" >nul 2>&1
-    echo       Python 설치 완료!
-) else (
-    for /f "tokens=*" %%v in ('python --version 2^>^&1') do echo       %%v 감지됨
+    :: --- 방법 3: bitsadmin ---
+    bitsadmin /transfer "PythonDownload" /download /priority foreground "%PYTHON_URL%" "%PYTHON_DL_PATH%" >nul 2>&1
+    if exist "%PYTHON_DL_PATH%" (
+        for %%A in ("%PYTHON_DL_PATH%") do if %%~zA GTR 1000 goto :python_install
+        del "%PYTHON_DL_PATH%" >nul 2>&1
+    )
+    echo       [3/3] bitsadmin 다운로드 실패.
+
+    :: --- 최후 수단: 브라우저 ---
+    echo.
+    echo       ============================================
+    echo       자동 다운로드에 실패했습니다.
+    echo       브라우저에서 Python 설치파일을 다운로드합니다...
+    echo       ============================================
+    echo.
+    start "" "%PYTHON_URL%"
+    echo       브라우저가 열렸습니다. 다운로드를 기다리는 중...
+    echo       (파일명: %PYTHON_INSTALLER%)
+    echo.
+
+    :: Downloads 폴더 또는 TEMP에서 인스톨러 감지 대기
+    set DOWNLOAD_DIRS="%USERPROFILE%\Downloads" "%TEMP%"
+    :wait_python
+    for %%D in (%DOWNLOAD_DIRS%) do (
+        if exist "%%~D\%PYTHON_INSTALLER%" (
+            copy /y "%%~D\%PYTHON_INSTALLER%" "%PYTHON_DL_PATH%" >nul
+            echo       다운로드 감지!
+            goto :python_install
+        )
+    )
+    timeout /t 2 /nobreak >nul
+    goto :wait_python
 )
+
+for /f "tokens=*" %%v in ('python --version 2^>^&1') do echo       %%v 감지됨
 echo.
+goto :after_python
+
+:python_install
+echo       Python %PYTHON_VERSION% 설치 중...
+"%PYTHON_DL_PATH%" /quiet InstallAllUsers=1 PrependPath=1 Include_pip=1
+if %errorlevel% neq 0 (
+    echo [오류] Python 설치 실패.
+    pause
+    exit /b 1
+)
+set "PATH=C:\Program Files\Python310;C:\Program Files\Python310\Scripts;%PATH%"
+del "%PYTHON_DL_PATH%" >nul 2>&1
+echo       Python %PYTHON_VERSION% 설치 완료!
+echo.
+
+:after_python
 
 :: ─────────────────────────────────────
 :: 2) 설치 디렉터리 생성
