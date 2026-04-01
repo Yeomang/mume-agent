@@ -1,10 +1,10 @@
 # C:\mume_meritz\automation_target_store.py
 
 """
-자동 실행 대상을 Supabase automation_job_targets 테이블에서 조회하는 유틸리티.
+자동 실행 대상을 Supabase user_accounts 테이블에서 조회하는 유틸리티.
 
-코드에서 사용할 때는 _normalize_user_accounts()를 통해
-아래처럼 변환된 형태로 쓰게 된다.
+user_accounts.is_automation_target = true 인 계좌를 조회하여
+아래처럼 변환된 형태로 반환한다.
 
     {
       "최용준": [
@@ -24,43 +24,9 @@ import logging
 from typing import Any, Dict, List, Tuple
 
 
-def _normalize_user_accounts(
-    raw: Dict[str, List[Any]] | None
-) -> Dict[str, List[Dict[str, Any]]]:
+def _load_from_supabase() -> Dict[str, List[int]] | None:
     """
-    {"이름": [1, 3]} 또는 {"이름": [{"account":1}, {"account":3, "cycle":2}]} 형태를
-    {"이름": [{"account": 1, "cycles": None}, {"account": 3, "cycles": None}]} 로 정리.
-    사이클은 모두 무시하고 계좌 레벨만 사용.
-    """
-    if not raw:
-        return {}
-
-    result: Dict[str, List[Dict[str, Any]]] = {}
-    for name, items in raw.items():
-        if not items:
-            continue
-        acc_set = set()
-        for item in items:
-            try:
-                if isinstance(item, dict):
-                    acc = int(item.get("account", 0))
-                else:
-                    acc = int(item)
-            except Exception:
-                continue
-            if acc > 0:
-                acc_set.add(acc)
-
-        if acc_set:
-            result[str(name)] = [{"account": acc, "cycles": None} for acc in sorted(acc_set)]
-
-    return result
-
-
-def _load_from_supabase(job: str) -> Dict[str, List[Any]] | None:
-    """
-    Supabase automation_job_targets 테이블에서 해당 job의 자동 실행 대상을 조회.
-    여러 auth_user가 같은 job에 대해 설정했을 수 있으므로 모든 행을 병합한다.
+    Supabase user_accounts 테이블에서 is_automation_target=true인 계좌를 조회.
     조회 실패 시 None을 반환.
     """
     try:
@@ -71,28 +37,28 @@ def _load_from_supabase(job: str) -> Dict[str, List[Any]] | None:
             return None
 
         res = (
-            sb.table("automation_job_targets")
-            .select("user_accounts")
-            .eq("job", job)
+            sb.table("user_accounts")
+            .select("user_name,account_index")
+            .eq("is_automation_target", True)
             .execute()
         )
         rows = res.data or []
         if not rows:
             return None
 
-        merged: Dict[str, List[Any]] = {}
+        merged: Dict[str, List[int]] = {}
         for row in rows:
-            ua = row.get("user_accounts")
-            if not isinstance(ua, dict):
+            name = (row.get("user_name") or "").strip()
+            if not name:
                 continue
-            for name, accounts in ua.items():
-                if name not in merged:
-                    merged[name] = accounts
-                else:
-                    existing = set(merged[name])
-                    for acc in accounts:
-                        if acc not in existing:
-                            merged[name].append(acc)
+            try:
+                acc = int(row.get("account_index"))
+            except (TypeError, ValueError):
+                continue
+            if name not in merged:
+                merged[name] = []
+            if acc not in merged[name]:
+                merged[name].append(acc)
         return merged if merged else None
     except Exception as e:
         logging.warning(f"[automation_target] Supabase 조회 실패: {e}")
@@ -103,7 +69,8 @@ def load_automation_target(
     job: str | None = None,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
-    Supabase automation_job_targets 테이블에서 자동 실행 대상을 normalized 형태로 반환.
+    Supabase user_accounts 테이블에서 자동 실행 대상을 normalized 형태로 반환.
+    job 파라미터는 하위호환을 위해 유지하나 무시된다.
 
     반환 예:
     {
@@ -111,13 +78,15 @@ def load_automation_target(
       ...
     }
     """
-    if job:
-        supabase_targets = _load_from_supabase(job)
-        if supabase_targets:
-            logging.info(f"[automation_target] Supabase에서 '{job}' 대상 로드 완료")
-            return _normalize_user_accounts(supabase_targets)
+    targets = _load_from_supabase()
+    if targets:
+        logging.info("[automation_target] Supabase에서 대상 로드 완료")
+        result: Dict[str, List[Dict[str, Any]]] = {}
+        for name, accounts in targets.items():
+            result[name] = [{"account": acc, "cycles": None} for acc in sorted(accounts)]
+        return result
 
-    logging.warning(f"[automation_target] Supabase에서 '{job}' 대상을 찾을 수 없음")
+    logging.warning("[automation_target] Supabase에서 대상을 찾을 수 없음")
     return {}
 
 
@@ -129,8 +98,7 @@ def load_automation_target_with_meta(
     자동 실행 대상을 raw 형식으로 반환. (각 모듈 __main__ 테스트용)
     Supabase에서 조회하며, updated_at은 None으로 반환.
     """
-    if job:
-        targets = _load_from_supabase(job)
-        if targets:
-            return targets, None
+    targets = _load_from_supabase()
+    if targets:
+        return targets, None
     return {}, None
