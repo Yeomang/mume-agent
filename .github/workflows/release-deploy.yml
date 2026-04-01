@@ -1,15 +1,15 @@
 name: Release & Deploy
- 
+
 on:
   push:
     branches: [main]
- 
+
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
- 
+
       - name: Create release zip
         run: |
           zip -r mume-agent.zip . \
@@ -31,22 +31,25 @@ jobs:
             -x "CLAUDE.md" \
             -x ".gitignore" \
             -x "setup.bat"
- 
-      - name: Delete existing current release
+
+      - name: Update release (asset만 교체, release 삭제 안 함)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete current --yes --cleanup-tag 2>/dev/null || true
- 
-      - name: Create release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create current mume-agent.zip \
-            --title "Latest Release ($(date -u +%Y-%m-%d\ %H:%M))" \
-            --notes "Auto-release from commit ${{ github.sha }}" \
-            --latest
- 
+          # release가 없으면 생성
+          if ! gh release view current > /dev/null 2>&1; then
+            gh release create current mume-agent.zip \
+              --title "Current Release" \
+              --notes "Auto-release from commit ${{ github.sha }}" \
+              --latest
+          else
+            # 기존 asset 삭제 후 새 asset 업로드 (release 자체는 유지)
+            gh release delete-asset current mume-agent.zip --yes 2>/dev/null || true
+            gh release upload current mume-agent.zip --clobber
+            gh release edit current \
+              --notes "Auto-release from commit ${{ github.sha }}"
+          fi
+
       - name: Notify mume-console for auto-deploy
         if: vars.CONSOLE_WEBHOOK_URL != ''
         run: |
