@@ -26,6 +26,7 @@ def _get_active_cycles(sb, selected_user, account_index, cycles=None):
         .eq("user_name", selected_user)
         .eq("account_index", account_index)
         .eq("broker", "메리츠")
+        .not_.is_("account_id", "null")
         .order("cycle_seq", desc=False)
         .range(s, e)
         .execute()
