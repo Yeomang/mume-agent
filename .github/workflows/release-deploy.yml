@@ -32,17 +32,17 @@ jobs:
             -x ".gitignore" \
             -x "setup.bat"
  
-      - name: Delete existing latest release
+      - name: Delete existing current release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release delete current --yes --cleanup-tag 2>/dev/null || true
  
       - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create latest mume-agent.zip \
+          gh release create current mume-agent.zip \
             --title "Latest Release ($(date -u +%Y-%m-%d\ %H:%M))" \
             --notes "Auto-release from commit ${{ github.sha }}" \
             --latest
@@ -56,6 +56,6 @@ jobs:
             -d '{
               "repo": "Yeomang/mume-agent",
               "sha": "${{ github.sha }}",
-              "release_url": "https://github.com/Yeomang/mume-agent/releases/download/latest/mume-agent.zip"
+              "release_url": "https://github.com/Yeomang/mume-agent/releases/download/current/mume-agent.zip"
             }' \
             --fail --max-time 30 || echo "::warning::Webhook 전송 실패 (비치명적)"
