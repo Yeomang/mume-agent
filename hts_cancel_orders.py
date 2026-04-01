@@ -169,7 +169,7 @@ def hts_cancel_orders(selected_user, account_index, is_test_mode):
             if cancel_button:
                 cancel_button.click_input()
                 logging.info("'취소주문' 버튼을 클릭했습니다. 주문 취소 처리 대기 중...")
-                time.sleep(10)
+                time.sleep(3)
                 # 취소 처리 완료 후 확인창 닫기
                 close_button = find_control_by_criteria(cancel_modal, "Button", automation_id=AUTO_ID_CANCEL_CLOSE_BUTTON, silent=True)
                 if close_button:
