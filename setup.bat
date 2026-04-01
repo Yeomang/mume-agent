@@ -70,10 +70,9 @@ if %errorlevel% neq 0 (
     echo       (파일명: %PYTHON_INSTALLER%)
     echo.
 
-    :: Downloads 폴더 또는 TEMP에서 인스톨러 감지 대기
-    set DOWNLOAD_DIRS="%USERPROFILE%\Downloads" "%TEMP%"
+    :: Downloads 폴더, OneDrive Downloads, 또는 TEMP에서 인스톨러 감지 대기
     :wait_python
-    for %%D in (%DOWNLOAD_DIRS%) do (
+    for %%D in ("%USERPROFILE%\Downloads" "%USERPROFILE%\OneDrive\Downloads" "%TEMP%") do (
         if exist "%%~D\%PYTHON_INSTALLER%" (
             copy /y "%%~D\%PYTHON_INSTALLER%" "%PYTHON_DL_PATH%" >nul
             echo       다운로드 감지!
@@ -89,7 +88,7 @@ echo.
 goto :after_python
 
 :python_install
-echo       Python %PYTHON_VERSION% 설치 중...
+echo       Python %PYTHON_VERSION% 설치 중 (1~2분 소요)...
 "%PYTHON_DL_PATH%" /quiet InstallAllUsers=1 PrependPath=1 Include_pip=1
 if %errorlevel% neq 0 (
     echo [오류] Python 설치 실패.
@@ -97,7 +96,17 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 set "PATH=C:\Program Files\Python310;C:\Program Files\Python310\Scripts;%PATH%"
+set "PATH=C:\Python310;C:\Python310\Scripts;%PATH%"
+set "PATH=%LOCALAPPDATA%\Programs\Python\Python310;%LOCALAPPDATA%\Programs\Python\Python310\Scripts;%PATH%"
 del "%PYTHON_DL_PATH%" >nul 2>&1
+
+python --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [오류] Python 설치 완료되었으나 PATH에서 찾을 수 없습니다.
+    echo       이 창을 닫고 새 cmd 창에서 setup.bat을 다시 실행해주세요.
+    pause
+    exit /b 1
+)
 echo       Python %PYTHON_VERSION% 설치 완료!
 echo.
 
@@ -157,7 +166,13 @@ if not exist "%INSTALL_DIR%\.venv" (
 )
 
 call "%INSTALL_DIR%\.venv\Scripts\activate.bat"
+python -m pip install --upgrade pip --quiet --disable-pip-version-check 2>nul
 pip install -r "%INSTALL_DIR%\requirements.txt" --quiet --disable-pip-version-check
+if %errorlevel% neq 0 (
+    echo [오류] 의존성 설치 실패. 인터넷 연결을 확인해주세요.
+    pause
+    exit /b 1
+)
 echo       의존성 설치 완료!
 echo.
 
@@ -168,6 +183,31 @@ echo [5/7] 환경 설정...
 if exist "%INSTALL_DIR%\.env" (
     echo       기존 .env 파일이 있습니다. 건너뜁니다.
 ) else (
+    :: HTS 실행파일 자동 탐색
+    set HTS_EXE=
+    for %%P in (
+        "C:\iMeritz\imeritz.exe"
+        "C:\iMeritz XII\Main\imeritz.exe"
+        "C:\Program Files\iMeritz\imeritz.exe"
+        "C:\Program Files (x86)\iMeritz\imeritz.exe"
+    ) do (
+        if exist %%P (
+            set "HTS_EXE=%%~P"
+        )
+    )
+    if "!HTS_EXE!"=="" (
+        for /f "tokens=*" %%F in ('dir /s /b C:\imeritz.exe 2^>nul ^| findstr /i imeritz.exe') do (
+            set "HTS_EXE=%%F"
+        )
+    )
+    if "!HTS_EXE!"=="" (
+        set "HTS_EXE=C:\iMeritz\imeritz.exe"
+        echo       [경고] HTS가 설치되어 있지 않습니다.
+        echo       HTS 설치 후 %INSTALL_DIR%\.env 파일의 HTS_EXE_PATH를 수정해주세요.
+    ) else (
+        echo       HTS 감지: !HTS_EXE!
+    )
+
     echo       환경 변수를 설정합니다.
     echo.
 
@@ -180,7 +220,7 @@ if exist "%INSTALL_DIR%\.env" (
 
     (
         echo # HTS 설정
-        echo HTS_EXE_PATH=C:\iMeritz\imeritz.exe
+        echo HTS_EXE_PATH=!HTS_EXE!
         echo HTS_WINDOW_NAME=iMeritz
         echo.
         echo # Supabase
