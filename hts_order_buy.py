@@ -93,14 +93,16 @@ def hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_i
         
         
         # 반복문을 사용해 buy_orders 리스트 내의 모든 주문을 실행
+        from pywinauto import Desktop
+        failed_orders = []
         for order in buy_orders:
             quantity = order["quantity"]
             price = order["price"]
-            
+
             if not quantity or not price:
                 logging.warning(f"유효하지 않은 주문 데이터: {order}")
                 continue  # 값이 없으면 건너뜀
-            
+
             logging.info(f"매수 주문 실행: ${price} | {quantity}주")
 
             # 매수 수량 입력
@@ -119,8 +121,6 @@ def hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_i
             time.sleep(1)
 
             # "주문가능금액이 부족합니다" 등 안내 모달이 먼저 뜨는지 체크
-            from pywinauto import Desktop
-            alert_handled = False
             try:
                 alert_modal = Desktop(backend="uia").window(title="안내", control_type="Window")
                 if alert_modal.exists(timeout=0.5):
@@ -132,18 +132,12 @@ def hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_i
                                 break
                     except Exception:
                         pass
-                    logging.error(f"주문 실패 안내: {alert_text}")
+                    logging.warning(f"주문 실패 ({alert_text}): ${price} x {quantity}주 — 다음 주문으로 계속 진행")
+                    failed_orders.append({"quantity": quantity, "price": price, "reason": alert_text})
                     ok_btn = find_control_by_criteria(alert_modal, "Button", title="확인", delay=0, silent=True)
                     if ok_btn:
                         ok_btn.click_input()
-                    try:
-                        tg_msg = f"⚠️ [{selected_user} | {account_index}번 계좌] 매수 주문 실패\n{ticker} ${price} x {quantity}주\n사유: {alert_text}"
-                        send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, tg_msg)
-                    except Exception:
-                        pass
-                    order_window.close()
-                    logging.info("'해외주식 주문' 창을 닫았습니다.")
-                    return False, alert_text
+                    continue  # 다음 주문으로 계속 진행
             except Exception:
                 pass
 
@@ -158,6 +152,15 @@ def hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_i
                 if buy_button:
                     buy_button.click_input()
                     logging.info("'실제 모드'이므로 '매수' 버튼을 클릭했습니다.")
+
+        # 실패한 주문이 있으면 텔레그램 알림
+        if failed_orders:
+            try:
+                fail_lines = [f"  ${f['price']} x {f['quantity']}주 ({f['reason']})" for f in failed_orders]
+                tg_msg = f"⚠️ [{selected_user} | {account_index}번 계좌] {ticker} 일부 매수 주문 실패\n" + "\n".join(fail_lines)
+                send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, tg_msg)
+            except Exception:
+                pass
 
         order_window.close()
         logging.info("'해외주식 주문' 창을 닫았습니다.")
