@@ -157,8 +157,8 @@ def block_input(state=True):
         logging.info("(입력 잠금 해제)마우스 및 키보드 잠금이 해제되었습니다.")
 
 
-def find_control_by_criteria(parent, control_type, automation_id=None, title=None, index=0, retries=3, delay=1):
-    """특정 기준에 따라 하위 컨트롤을 찾습니다."""
+def find_control_by_criteria(parent, control_type, automation_id=None, title=None, index=0, retries=3, delay=1, silent=False):
+    """특정 기준에 따라 하위 컨트롤을 찾습니다. silent=True이면 못 찾아도 WARNING 생략."""
     time.sleep(delay)
     for attempt in range(retries):
         try:
@@ -172,13 +172,16 @@ def find_control_by_criteria(parent, control_type, automation_id=None, title=Non
                 logging.info(f"하위 컨트롤 중 control_type='{control_type}', automation_id='{automation_id}', title='{title}' 인 것 중 '{index+1}'번째 컨트롤을 찾았습니다.")
                 return controls[index]
             else:
-                logging.warning(f"컨트롤을 찾지 못했습니다: control_type='{control_type}', automation_id='{automation_id}', title='{title}', index={index}")
+                if not silent:
+                    logging.warning(f"컨트롤을 찾지 못했습니다: control_type='{control_type}', automation_id='{automation_id}', title='{title}', index={index}")
                 return None
         except Exception as e:
-            logging.warning(f"컨트롤 탐색 중 오류 발생 (시도 {attempt+1}/{retries}): {e}")
+            if not silent:
+                logging.warning(f"컨트롤 탐색 중 오류 발생 (시도 {attempt+1}/{retries}): {e}")
             if attempt < retries - 1:
                 time.sleep(1)
-    logging.error(f"컨트롤 탐색 실패 (최대 재시도 초과): control_type='{control_type}', automation_id='{automation_id}', title='{title}'")
+    if not silent:
+        logging.error(f"컨트롤 탐색 실패 (최대 재시도 초과): control_type='{control_type}', automation_id='{automation_id}', title='{title}'")
     return None
 
 
@@ -274,7 +277,7 @@ def _handle_password_dialog(main_window, password):
     """
     dialog = wait_for_window("비밀번호 입력 안내창", main_window, "Meritz", "Window", timeout=3)
     if dialog:
-        ok_button = find_control_by_criteria(dialog, "Button", automation_id="2", delay=0)
+        ok_button = find_control_by_criteria(dialog, "Button", automation_id="2", delay=0, silent=True)
         if ok_button:
             ok_button.click_input()
             logging.info("비밀번호 입력 안내창의 확인 버튼을 클릭하였습니다.")
@@ -285,7 +288,7 @@ def _handle_password_dialog(main_window, password):
             time.sleep(1)
             pw_error = wait_for_window("비밀번호 오류 확인", main_window, "Meritz", "Window", timeout=2)
             if pw_error:
-                err_ok = find_control_by_criteria(pw_error, "Button", title="확인", delay=0)
+                err_ok = find_control_by_criteria(pw_error, "Button", title="확인", delay=0, silent=True)
                 if err_ok:
                     err_ok.click_input()
                     logging.info("비밀번호 오류 안내 모달의 확인 버튼을 클릭하였습니다.")

@@ -107,26 +107,25 @@ def hts_cancel_orders(selected_user, account_index, is_test_mode):
 
         # 전체 선택 체크박스 클릭 (그리드 헤더의 전체선택 컬럼 상대좌표 클릭)
         logging.info("전체 선택 체크박스 클릭 중...")
-        grid = find_control_by_criteria(bottom_tab, "Pane", automation_id=AUTO_ID_UNFILLED_GRID)
+        grid = find_control_by_criteria(bottom_tab, "Pane", automation_id=AUTO_ID_UNFILLED_GRID, silent=True)
         if grid:
             grid_rect = grid.rectangle()
-            abs_x = grid_rect.left + SELECT_ALL_CHECKBOX_COORDS[0]
-            abs_y = grid_rect.top + SELECT_ALL_CHECKBOX_COORDS[1]
             logging.info(f"그리드 위치: left={grid_rect.left}, top={grid_rect.top}, right={grid_rect.right}, bottom={grid_rect.bottom}")
-            logging.info(f"전체 선택 클릭 좌표: 상대=({SELECT_ALL_CHECKBOX_COORDS[0]}, {SELECT_ALL_CHECKBOX_COORDS[1]}), 절대=({abs_x}, {abs_y})")
             grid.click_input(coords=SELECT_ALL_CHECKBOX_COORDS)
             logging.info("전체 선택 체크박스를 클릭하였습니다.")
         else:
-            logging.warning("미체결 그리드를 찾지 못했습니다. 미체결 주문이 없을 수 있습니다.")
+            logging.info("미체결 그리드를 찾지 못했습니다. 미체결 주문이 없을 수 있습니다.")
 
-        # 일괄취소 버튼 클릭 (하단 탭 내부에서 검색)
+        # 일괄취소 버튼 클릭 (하단 탭 내부에서 검색, 못 찾으면 order_window에서 재시도)
         logging.info("일괄취소 버튼 찾는 중...")
-        batch_cancel_button = find_control_by_criteria(bottom_tab, "Button", automation_id=AUTO_ID_BATCH_CANCEL_BUTTON)
+        batch_cancel_button = find_control_by_criteria(bottom_tab, "Button", automation_id=AUTO_ID_BATCH_CANCEL_BUTTON, silent=True)
+        if not batch_cancel_button:
+            # bottom_tab에서 못 찾으면 order_window 전체에서 검색
+            batch_cancel_button = find_control_by_criteria(order_window, "Button", automation_id=AUTO_ID_BATCH_CANCEL_BUTTON)
         if batch_cancel_button:
             batch_cancel_button.click_input()
             logging.info("일괄취소 버튼을 클릭하였습니다.")
         else:
-            logging.warning("일괄취소 버튼을 찾지 못했습니다.")
             raise Exception("일괄취소 버튼을 찾을 수 없습니다.")
 
         # 일괄취소 버튼 클릭 후 모달 처리
