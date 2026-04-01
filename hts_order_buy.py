@@ -111,11 +111,43 @@ def hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_i
             price_buy_input = find_control_by_criteria(order_window, "Pane", automation_id=AUTO_ID_PRICE_BUY_INPUT)
             set_focus_and_type(price_buy_input, f"{price}{{ENTER}}")
 
-            # 매수 실행    
+            # 매수 실행
             send_keys(HOTKEY_BUY)
             logging.info(f"매수 실행 버튼을 클릭하였습니다.")
 
-            # 테스트 모드 및 실제 모드에 따른 버튼 클릭
+            # 매수 확인 팝업 또는 안내 모달 대기
+            time.sleep(1)
+
+            # "주문가능금액이 부족합니다" 등 안내 모달이 먼저 뜨는지 체크
+            from pywinauto import Desktop
+            alert_handled = False
+            try:
+                alert_modal = Desktop(backend="uia").window(title="안내", control_type="Window")
+                if alert_modal.exists(timeout=0.5):
+                    alert_text = ""
+                    try:
+                        for ctrl in alert_modal.descendants():
+                            if ctrl.element_info.control_type == "Text":
+                                alert_text = ctrl.element_info.name or ""
+                                break
+                    except Exception:
+                        pass
+                    logging.error(f"주문 실패 안내: {alert_text}")
+                    ok_btn = find_control_by_criteria(alert_modal, "Button", title="확인", delay=0, silent=True)
+                    if ok_btn:
+                        ok_btn.click_input()
+                    try:
+                        tg_msg = f"⚠️ [{selected_user} | {account_index}번 계좌] 매수 주문 실패\n{ticker} ${price} x {quantity}주\n사유: {alert_text}"
+                        send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, tg_msg)
+                    except Exception:
+                        pass
+                    order_window.close()
+                    logging.info("'해외주식 주문' 창을 닫았습니다.")
+                    return False, alert_text
+            except Exception:
+                pass
+
+            # 안내 모달이 없으면 매수 확인 팝업 처리
             if is_test_mode:
                 close_button = find_control_by_criteria(main_window, "Button", automation_id=AUTO_ID_CLOSE_BUTTON)
                 if close_button:
@@ -126,38 +158,6 @@ def hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_i
                 if buy_button:
                     buy_button.click_input()
                     logging.info("'실제 모드'이므로 '매수' 버튼을 클릭했습니다.")
-
-            # "주문가능금액이 부족합니다" 등 안내 모달 체크
-            time.sleep(0.5)
-            from pywinauto import Desktop
-            try:
-                alert_modal = Desktop(backend="uia").window(title="안내", control_type="Window")
-                if alert_modal.exists(timeout=1):
-                    alert_text = ""
-                    try:
-                        for ctrl in alert_modal.descendants():
-                            if ctrl.element_info.control_type == "Text":
-                                alert_text = ctrl.element_info.name or ""
-                                break
-                    except Exception:
-                        pass
-                    logging.error(f"주문 실패 안내: {alert_text}")
-                    # 확인 버튼 클릭
-                    ok_btn = find_control_by_criteria(alert_modal, "Button", title="확인", delay=0, silent=True)
-                    if ok_btn:
-                        ok_btn.click_input()
-                    # 텔레그램 알림
-                    try:
-                        tg_msg = f"⚠️ [{selected_user} | {account_index}번 계좌] 매수 주문 실패\n{ticker} ${price} x {quantity}주\n사유: {alert_text}"
-                        send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, tg_msg)
-                    except Exception:
-                        pass
-                    # 나머지 주문 중단
-                    order_window.close()
-                    logging.info("'해외주식 주문' 창을 닫았습니다.")
-                    return False, alert_text
-            except Exception:
-                pass
 
         order_window.close()
         logging.info("'해외주식 주문' 창을 닫았습니다.")
