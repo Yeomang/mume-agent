@@ -122,8 +122,17 @@ def hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_i
 
             # "주문가능금액이 부족합니다" 등 안내 모달이 먼저 뜨는지 체크
             try:
-                alert_modal = Desktop(backend="uia").window(title="안내", control_type="Window")
-                if alert_modal.exists(timeout=0.5):
+                desktop = Desktop(backend="uia")
+                alert_modal = None
+                for ctype in ["Window", "Dialog"]:
+                    try:
+                        m = desktop.window(title="안내", control_type=ctype)
+                        if m.exists(timeout=1):
+                            alert_modal = m
+                            break
+                    except Exception:
+                        pass
+                if alert_modal:
                     alert_text = ""
                     try:
                         for ctrl in alert_modal.descendants():
