@@ -264,8 +264,39 @@ def wait_for_window(message, parent, title, control_type, timeout=120):
         
         
 
+def _handle_password_dialog(main_window, password):
+    """
+    계좌 선택 후 나타나는 비밀번호 관련 모달을 처리합니다.
+
+    1) '비밀번호 입력 안내창' → 확인 클릭 → 비밀번호 입력
+    2) '비밀번호를 확인후 다시 입력하십시오' 모달 → 확인 클릭
+    3) 모달 없음 → 이미 인증된 상태
+    """
+    dialog = wait_for_window("비밀번호 입력 안내창", main_window, "Meritz", "Window", timeout=3)
+    if dialog:
+        ok_button = find_control_by_criteria(dialog, "Button", automation_id="2", delay=0)
+        if ok_button:
+            ok_button.click_input()
+            logging.info("비밀번호 입력 안내창의 확인 버튼을 클릭하였습니다.")
+            set_focus_and_type(None, f"+{{TAB}}{password}{{ENTER}}")
+            logging.info("비밀번호를 입력하였습니다.")
+
+            # 비밀번호 오류 모달 체크 ("비밀번호를 확인후 다시 입력하십시오")
+            time.sleep(1)
+            pw_error = wait_for_window("비밀번호 오류 확인", main_window, "Meritz", "Window", timeout=2)
+            if pw_error:
+                err_ok = find_control_by_criteria(pw_error, "Button", title="확인", delay=0)
+                if err_ok:
+                    err_ok.click_input()
+                    logging.info("비밀번호 오류 안내 모달의 확인 버튼을 클릭하였습니다.")
+        else:
+            logging.info("비밀번호 입력 안내창 없음 (이미 인증된 상태)")
+    else:
+        logging.info("비밀번호 입력 안내창 없음 (이미 인증된 상태)")
+
+
 def copy_to_clipboard(text):
-    """클립보드에 텍스트 복사합니다.""" 
+    """클립보드에 텍스트 복사합니다."""
     win32clipboard.OpenClipboard()
     win32clipboard.EmptyClipboard()
     win32clipboard.SetClipboardText(text, win32clipboard.CF_UNICODETEXT)  # UTF-16LE 사용

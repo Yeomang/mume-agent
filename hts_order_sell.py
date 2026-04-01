@@ -1,4 +1,4 @@
-from utils import setup_window, find_control_by_criteria, set_focus_and_type, wait_for_window, block_input
+from utils import setup_window, find_control_by_criteria, set_focus_and_type, wait_for_window, block_input, _handle_password_dialog
 from secrets_manager import get_account_password
 from config import Config
 from pywinauto import Application
@@ -69,15 +69,7 @@ def hts_order_sell(selected_user, account_index, ticker, sell_orders, is_test_mo
         logging.info(f"{selected_user}님의 {account_index}번째 계좌번호를 선택하였습니다.")
         
         # 비밀번호 입력 안내창 처리
-        dialog = wait_for_window("비밀번호 입력 안내창", main_window, "Meritz", "Window", timeout=3)
-        if dialog:
-            logging.info(f"확인 버튼 찾는 중...")
-            ok_button = find_control_by_criteria(dialog, "Button", automation_id=AUTO_ID_PASSWORD_DIALOG_OK_BUTTON)
-            if ok_button:
-                ok_button.click_input()
-                logging.info(f"확인 버튼을 클릭하였습니다.")
-                set_focus_and_type(None, f"+{{TAB}}{password}{{ENTER}}")
-                logging.info(f"비밀번호를 입력하였습니다.")    
+        _handle_password_dialog(main_window, password)    
 
         # 매도 탭 클릭
         logging.info(f"매도 탭 버튼 찾는 중...")
