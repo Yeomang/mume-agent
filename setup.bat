@@ -33,7 +33,7 @@ if %errorlevel% neq 0 (
     echo       Python이 설치되어 있지 않습니다. 자동 설치합니다...
     echo       다운로드 중: %PYTHON_URL%
 
-    powershell -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '%PYTHON_URL%' -OutFile '%TEMP%\%PYTHON_INSTALLER%' -UseBasicParsing" 2>nul
+    powershell -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; (New-Object Net.WebClient).DownloadFile('%PYTHON_URL%','%TEMP%\%PYTHON_INSTALLER%')" 2>nul
     if not exist "%TEMP%\%PYTHON_INSTALLER%" (
         echo [오류] Python 다운로드 실패. 인터넷 연결을 확인해주세요.
         pause
@@ -76,7 +76,7 @@ echo [3/7] 최신 코드 다운로드 중...
 set ZIP_PATH=%TEMP%\mume-agent.zip
 set EXTRACT_PATH=%TEMP%\mume-agent-extract
 
-powershell -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '%RELEASE_URL%' -OutFile '%ZIP_PATH%' -UseBasicParsing" 2>nul
+powershell -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; (New-Object Net.WebClient).DownloadFile('%RELEASE_URL%','%ZIP_PATH%')" 2>nul
 if not exist "%ZIP_PATH%" (
     echo [오류] 코드 다운로드 실패. 인터넷 연결을 확인해주세요.
     pause
