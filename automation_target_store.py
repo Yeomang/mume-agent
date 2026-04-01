@@ -77,6 +77,8 @@ def _load_from_supabase() -> Dict[str, List[int]] | None:
 
 def get_auth_user_ids() -> List[str]:
     """자동 실행 대상에서 조회된 auth_user_id 목록을 반환."""
+    if not _cached_auth_user_ids:
+        _load_from_supabase()
     return _cached_auth_user_ids
 
 
