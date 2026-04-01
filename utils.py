@@ -277,7 +277,7 @@ def _handle_password_dialog(main_window, password):
     """
     dialog = wait_for_window("비밀번호 입력 안내창", main_window, "Meritz", "Window", timeout=3)
     if dialog:
-        ok_button = find_control_by_criteria(dialog, "Button", automation_id="2", delay=0, silent=True)
+        ok_button = find_control_by_criteria(dialog, "Button", automation_id="2", silent=True)
         if ok_button:
             ok_button.click_input()
             logging.info("비밀번호 입력 안내창의 확인 버튼을 클릭하였습니다.")
@@ -288,7 +288,7 @@ def _handle_password_dialog(main_window, password):
             time.sleep(1)
             pw_error = wait_for_window("비밀번호 오류 확인", main_window, "Meritz", "Window", timeout=2)
             if pw_error:
-                err_ok = find_control_by_criteria(pw_error, "Button", title="확인", delay=0, silent=True)
+                err_ok = find_control_by_criteria(pw_error, "Button", title="확인", silent=True)
                 if err_ok:
                     err_ok.click_input()
                     logging.info("비밀번호 오류 안내 모달의 확인 버튼을 클릭하였습니다.")
