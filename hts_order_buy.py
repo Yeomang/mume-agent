@@ -105,11 +105,11 @@ def hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_i
             logging.info(f"매수 주문 실행: ${price} | {quantity}주")
 
             # 매수 수량 입력
-            quantity_buy_input = find_control_by_criteria(order_window, "Pane", automation_id=AUTO_ID_QUANTITY_BUY_INPUT)
+            quantity_buy_input = find_control_by_criteria(order_window, "Pane", automation_id=AUTO_ID_QUANTITY_BUY_INPUT, delay=0.3)
             set_focus_and_type(quantity_buy_input, f"{quantity}{{ENTER}}")
 
             # 매수 가격 입력
-            price_buy_input = find_control_by_criteria(order_window, "Pane", automation_id=AUTO_ID_PRICE_BUY_INPUT)
+            price_buy_input = find_control_by_criteria(order_window, "Pane", automation_id=AUTO_ID_PRICE_BUY_INPUT, delay=0.3)
             set_focus_and_type(price_buy_input, f"{price}{{ENTER}}")
 
             # 매수 실행
@@ -118,19 +118,18 @@ def hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_i
 
             # 매수 확인 팝업 처리
             if is_test_mode:
-                close_button = find_control_by_criteria(main_window, "Button", automation_id=AUTO_ID_CLOSE_BUTTON)
+                close_button = find_control_by_criteria(main_window, "Button", automation_id=AUTO_ID_CLOSE_BUTTON, delay=0.5)
                 if close_button:
                     close_button.click_input()
                     logging.info("'테스트 모드'이므로 '닫기' 버튼을 클릭했습니다.")
             else:
-                buy_button = find_control_by_criteria(main_window, "Button", automation_id=AUTO_ID_BUY_BUTTON)
+                buy_button = find_control_by_criteria(main_window, "Button", automation_id=AUTO_ID_BUY_BUTTON, delay=0.5)
                 if buy_button:
                     buy_button.click_input()
                     logging.info("'실제 모드'이므로 '매수' 버튼을 클릭했습니다.")
 
             # 매수 확인 버튼 클릭 후 "주문가능금액이 부족합니다" 등 안내 모달 체크
-            # wait_for_window의 4단계 검색 사용 (win32gui + Desktop Window/Dialog + 자식 창)
-            alert_modal = wait_for_window("안내", main_window, "안내", "Window", timeout=2)
+            alert_modal = wait_for_window("안내", main_window, "안내", "Window", timeout=1)
             if alert_modal:
                 alert_text = ""
                 try:
