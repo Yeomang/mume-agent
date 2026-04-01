@@ -66,9 +66,10 @@ def _load_from_supabase() -> Dict[str, List[int]] | None:
                 merged[name].append(acc)
             uid = row.get("auth_user_id")
             if uid:
-                auth_user_ids.add(uid)
+                auth_user_ids.add(str(uid))
 
         _cached_auth_user_ids = list(auth_user_ids)
+        logging.info(f"[automation_target] auth_user_ids: {_cached_auth_user_ids}")
         return merged if merged else None
     except Exception as e:
         logging.warning(f"[automation_target] Supabase 조회 실패: {e}")
