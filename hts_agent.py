@@ -59,6 +59,13 @@ JOB_CONFIG: Dict[str, Dict[str, Path]] = {
     "cancel_orders": {"script": BASE_DIR / "main_cancel_orders.py"},
 }
 
+JOB_LABEL: Dict[str, str] = {
+    "morning": "Morning",
+    "evening": "Evening",
+    "aftermarket": "Aftermarket",
+    "cancel_orders": "Cancel Orders",
+}
+
 CURRENT_PROC: Dict[str, Optional[subprocess.Popen]] = {
     job: None for job in JOB_CONFIG
 }
@@ -105,7 +112,7 @@ def write_log(event: str, job: str, detail: str = "") -> None:
 # ─────────────────────────────────────
 def _ensure_valid_job(job: str) -> None:
     if job not in JOB_CONFIG:
-        raise HTTPException(status_code=400, detail=f"알 수 없는 작업 유형입니다: {job}")
+        raise HTTPException(status_code=400, detail=f"알 수 없는 작업 유형입니다: {JOB_LABEL.get(job, job)}")
 
 
 def _update_status_from_proc(job: str) -> None:
@@ -262,7 +269,7 @@ def run_job(
 
         if CURRENT_PROC[job] is not None:
             write_log("START_REJECTED", job, "already running")
-            raise HTTPException(status_code=409, detail=f"{job} 작업이 이미 실행 중입니다.")
+            raise HTTPException(status_code=409, detail=f"{JOB_LABEL.get(job, job)} 작업이 이미 실행 중입니다.")
 
         script_path = JOB_CONFIG[job]["script"]
         if not script_path.exists():
@@ -288,7 +295,7 @@ def run_job(
         pid = CURRENT_PROC[job].pid if CURRENT_PROC[job] else "-"
         write_log("STARTED", job, f"pid={pid}")
 
-    return {"message": f"{job} 작업을 시작했습니다."}
+    return {"message": f"{JOB_LABEL.get(job, job)} 작업을 시작했습니다."}
 
 
 @app.post("/stop")
@@ -357,7 +364,7 @@ def stop_job(job: str):
         LAST_STATUS[job]["returncode"] = None
         write_log("STOPPED", job, "HTS closed, input unlocked")
 
-    return {"message": f"{job} 작업을 중지했습니다."}
+    return {"message": f"{JOB_LABEL.get(job, job)} 작업을 중지했습니다."}
 
 
 @app.get("/status")
