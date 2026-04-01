@@ -76,7 +76,7 @@ echo [3/7] 최신 코드 다운로드 중...
 set ZIP_PATH=%TEMP%\mume-agent.zip
 set EXTRACT_PATH=%TEMP%\mume-agent-extract
 
-python -c "import urllib.request; urllib.request.urlretrieve('%RELEASE_URL%', '%ZIP_PATH%')"
+python -c "import urllib.request,sys; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])" "%RELEASE_URL%" "%ZIP_PATH%"
 if not exist "%ZIP_PATH%" (
     echo [오류] 코드 다운로드 실패. 인터넷 연결을 확인해주세요.
     pause
@@ -84,7 +84,7 @@ if not exist "%ZIP_PATH%" (
 )
 
 if exist "%EXTRACT_PATH%" rmdir /s /q "%EXTRACT_PATH%"
-python -c "import zipfile; zipfile.ZipFile('%ZIP_PATH%').extractall('%EXTRACT_PATH%')"
+python -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "%ZIP_PATH%" "%EXTRACT_PATH%"
 
 :: .py, .bat, requirements.txt 파일만 복사
 echo       코드 파일 복사 중...
