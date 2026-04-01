@@ -5,6 +5,7 @@ from pywinauto import Application
 import win32gui
 from pywinauto.keyboard import send_keys
 import logging
+import time
 
 # 상수 정의
 SCREEN_NUM_ORDER = "6100"  # 해외주식 주문 화면번호
