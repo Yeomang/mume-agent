@@ -359,39 +359,39 @@ def send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message):
         logging.error(f"텔레그램 알림 전송 실패: {e}")
         
         
+def _now_et():
+    """현재 미국 동부시간(ET) datetime 반환."""
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("America/New_York"))
+
+
 def is_trading_day_today():
-    # NYSE(미국 증권거래소) 캘린더 가져오기
+    """미국 동부시간(ET) 기준 오늘이 NYSE 거래일인지 확인."""
     nyse = mcal.get_calendar("NYSE")
+    et_now = _now_et()
+    today_et = et_now.strftime("%Y-%m-%d")
+    schedule = nyse.schedule(start_date=today_et, end_date=today_et)
 
-    # 오늘 날짜 가져오기
-    today = datetime.today().strftime("%Y-%m-%d")
-
-    # 해당 날짜가 휴장일인지 확인
-    schedule = nyse.schedule(start_date=today, end_date=today)
-
-    if schedule.empty:  # 휴장일이면 False 반환
-        logging.info(f"오늘({today})은 미국 주식시장 휴장일입니다. 주문을 실행하지 않습니다.")
+    if schedule.empty:
+        logging.info(f"오늘({today_et}, ET {et_now.strftime('%H:%M')})은 미국 주식시장 휴장일입니다. 주문을 실행하지 않습니다.")
         return False
-    else:  # 거래일이면 True 반환
-        logging.info(f"오늘({today})은 미국 주식시장 거래 가능한 날입니다. 주문을 실행합니다.")
-        return True    
+    else:
+        logging.info(f"오늘({today_et}, ET {et_now.strftime('%H:%M')})은 미국 주식시장 거래 가능한 날입니다. 주문을 실행합니다.")
+        return True
 
 
 def is_trading_day_yesterday():
-    # NYSE(미국 증권거래소) 캘린더 가져오기
+    """미국 동부시간(ET) 기준 어제가 NYSE 거래일인지 확인."""
     nyse = mcal.get_calendar("NYSE")
+    et_now = _now_et()
+    yesterday_et = (et_now - timedelta(days=1)).strftime("%Y-%m-%d")
+    schedule = nyse.schedule(start_date=yesterday_et, end_date=yesterday_et)
 
-    # 어제 날짜 가져오기
-    yesterday = (datetime.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-
-    # 해당 날짜가 휴장일인지 확인
-    schedule = nyse.schedule(start_date=yesterday, end_date=yesterday)
-
-    if schedule.empty:  # 휴장일이면 False 반환
-        logging.info(f"어제({yesterday})는 미국 주식시장 휴장일입니다. 주문을 실행하지 않습니다.")
+    if schedule.empty:
+        logging.info(f"어제({yesterday_et}, ET {et_now.strftime('%H:%M')})는 미국 주식시장 휴장일입니다. 주문을 실행하지 않습니다.")
         return False
-    else:  # 거래일이면 True 반환
-        logging.info(f"어제({yesterday})는 미국 주식시장 거래 가능한 날입니다. 주문을 실행합니다.")
+    else:
+        logging.info(f"어제({yesterday_et}, ET {et_now.strftime('%H:%M')})는 미국 주식시장 거래 가능한 날입니다. 주문을 실행합니다.")
         return True
     
 
