@@ -13,6 +13,79 @@ import pandas as pd
 
 _IS_WINDOWS = platform.system() == "Windows"
 
+
+# ─────────────────────────────────────
+# RDP 세션 유지 (GUI 자동화에 필수)
+# ─────────────────────────────────────
+
+def _is_desktop_active():
+    """활성 데스크톱이 존재하는지 Win32 API로 확인."""
+    if not _IS_WINDOWS:
+        return True
+    try:
+        hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x0100)
+        if hdesk:
+            ctypes.windll.user32.CloseDesktop(hdesk)
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def _get_current_session_id():
+    """현재 프로세스의 Windows 세션 ID 반환."""
+    if not _IS_WINDOWS:
+        return None
+    try:
+        session_id = ctypes.c_ulong()
+        pid = ctypes.windll.kernel32.GetCurrentProcessId()
+        if ctypes.windll.kernel32.ProcessIdToSessionId(pid, ctypes.byref(session_id)):
+            return session_id.value
+        return None
+    except Exception:
+        return None
+
+
+def ensure_active_desktop(max_retries=3, wait_after=3):
+    """
+    GUI 조작 전에 호출. 활성 데스크톱이 없으면 tscon으로 세션을 콘솔에 재연결.
+    RDP 끊긴 상태에서도 pywinauto가 정상 작동하도록 보장.
+    """
+    if not _IS_WINDOWS:
+        return True
+
+    for attempt in range(max_retries):
+        if _is_desktop_active():
+            if attempt > 0:
+                logging.info("활성 데스크톱 복원 성공.")
+            return True
+
+        logging.warning(f"활성 데스크톱 없음. tscon으로 세션 복원 시도 ({attempt+1}/{max_retries})")
+        session_id = _get_current_session_id()
+        if session_id is None:
+            logging.error("현재 세션 ID를 가져올 수 없습니다.")
+            time.sleep(2)
+            continue
+
+        try:
+            result = subprocess.run(
+                ["tscon", str(session_id), "/dest:console"],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode != 0:
+                logging.error(f"tscon 실패 (code {result.returncode}): {result.stderr.strip()}")
+            else:
+                logging.info(f"tscon 성공. {wait_after}초 대기 중...")
+            time.sleep(wait_after)
+        except Exception as e:
+            logging.error(f"tscon 실행 오류: {e}")
+            time.sleep(2)
+
+    if _is_desktop_active():
+        return True
+    logging.error("활성 데스크톱 복원 실패. GUI 자동화가 작동하지 않을 수 있습니다.")
+    return False
+
 if _IS_WINDOWS:
     from pywinauto.findwindows import ElementNotFoundError
     from pywinauto.keyboard import send_keys

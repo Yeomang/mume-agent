@@ -1,4 +1,4 @@
-from utils import block_input, get_window_handle, setup_window
+from utils import block_input, get_window_handle, setup_window, ensure_active_desktop
 import subprocess
 import time
 import win32gui
@@ -135,6 +135,11 @@ def hts_login(
         f"HTS 로그인 시작: exe='{exe_path}', user='{selected_user}', "
         f"category='{cert_keyword_category}', window_keyword='{window_keyword}'"
     )
+
+    # RDP 끊김 대비: 활성 데스크톱 확보 (GUI 자동화에 필수)
+    if not ensure_active_desktop():
+        logging.error("활성 데스크톱을 확보할 수 없어 로그인을 중단합니다.")
+        return False
 
     # 마우스 및 키보드 잠금 시작
     block_input(True)
