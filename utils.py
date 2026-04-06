@@ -242,19 +242,19 @@ def find_control_by_criteria(parent, control_type, automation_id=None, title=Non
                 and (title is None or ctrl.element_info.name == title)
             ]
             if len(controls) > index:
-                logging.info(f"하위 컨트롤 중 control_type='{control_type}', automation_id='{automation_id}', title='{title}' 인 것 중 '{index+1}'번째 컨트롤을 찾았습니다.")
+                logging.debug(f"컨트롤 발견: type='{control_type}', id='{automation_id}', title='{title}', idx={index+1}")
                 return controls[index]
             else:
                 if not silent:
-                    logging.warning(f"컨트롤을 찾지 못했습니다: control_type='{control_type}', automation_id='{automation_id}', title='{title}', index={index}")
+                    logging.debug(f"컨트롤 미발견: type='{control_type}', id='{automation_id}', title='{title}', idx={index}")
                 return None
         except Exception as e:
             if not silent:
-                logging.warning(f"컨트롤 탐색 중 오류 발생 (시도 {attempt+1}/{retries}): {e}")
+                logging.debug(f"컨트롤 탐색 재시도 ({attempt+1}/{retries}): {e}")
             if attempt < retries - 1:
                 time.sleep(1)
     if not silent:
-        logging.error(f"컨트롤 탐색 실패 (최대 재시도 초과): control_type='{control_type}', automation_id='{automation_id}', title='{title}'")
+        logging.warning(f"컨트롤 탐색 실패: type='{control_type}', id='{automation_id}', title='{title}'")
     return None
 
 
@@ -262,9 +262,9 @@ def set_focus_and_type(control, text):
     """컨트롤에 포커스를 설정하고 텍스트를 입력합니다."""
     if control:
         control.set_focus()
-        logging.info(f"컨트롤[{control}]에 포커스를 설정하였습니다.")
+        logging.debug(f"컨트롤 포커스 설정 완료")
     send_keys(text)
-    logging.info(f"텍스트를 입력하였습니다.")
+    logging.debug(f"텍스트 입력 완료")
 
 
 def wait_for_window(message, parent, title, control_type, timeout=120):
@@ -277,7 +277,8 @@ def wait_for_window(message, parent, title, control_type, timeout=120):
     """
     from pywinauto import Desktop, Application
     
-    logging.info(f"'{message}' 창이 나타날 때까지 최대 {timeout}초 동안 대기 중...")
+    _log = logging.info if timeout > 5 else logging.debug
+    _log(f"'{message}' 창 대기 중 (최대 {timeout}초)...")
     
     def find_window_by_partial_title(partial_title):
         """창 제목에 특정 문자열이 포함된 창의 핸들을 찾습니다."""
@@ -297,7 +298,7 @@ def wait_for_window(message, parent, title, control_type, timeout=120):
         try:
             hwnd = find_window_by_partial_title(title)
             if hwnd:
-                logging.info(f"'{message}' 창이 나타났습니다! (win32gui로 발견, hwnd={hwnd})")
+                logging.debug(f"'{message}' 창 발견 (win32gui, hwnd={hwnd})")
                 # pywinauto로 연결하여 반환
                 app = Application(backend="uia").connect(handle=hwnd)
                 return app.window(handle=hwnd)
@@ -309,7 +310,7 @@ def wait_for_window(message, parent, title, control_type, timeout=120):
             desktop = Desktop(backend="uia")
             control = desktop.window(title=title, control_type="Window")
             if control.exists():
-                logging.info(f"'{message}' 창이 나타났습니다! (Desktop Window에서 발견)")
+                logging.debug(f"'{message}' 창 발견 (Desktop Window)")
                 return control
         except Exception:
             pass
@@ -319,7 +320,7 @@ def wait_for_window(message, parent, title, control_type, timeout=120):
             desktop = Desktop(backend="uia")
             control = desktop.window(title=title, control_type="Dialog")
             if control.exists():
-                logging.info(f"'{message}' 창이 나타났습니다! (Desktop Dialog에서 발견)")
+                logging.debug(f"'{message}' 창 발견 (Desktop Dialog)")
                 return control
         except Exception:
             pass
@@ -328,14 +329,15 @@ def wait_for_window(message, parent, title, control_type, timeout=120):
         try:
             control = parent.child_window(title=title, control_type=control_type)
             if control.exists():
-                logging.info(f"'{message}' 창이 나타났습니다! (자식 창에서 발견)")
+                logging.debug(f"'{message}' 창 발견 (자식 창)")
                 return control
         except Exception:
             pass
 
         time.sleep(0.5)  # 0.5초마다 다시 체크
     
-    logging.warning(f"'{message}' 창이 {timeout}초 내에 나타나지 않았습니다.")
+    _log_timeout = logging.warning if timeout > 5 else logging.debug
+    _log_timeout(f"'{message}' 창이 {timeout}초 내에 나타나지 않았습니다.")
     return None  # 창을 찾지 못한 경우
         
         
@@ -353,9 +355,9 @@ def _handle_password_dialog(main_window, password):
         ok_button = find_control_by_criteria(dialog, "Button", automation_id="2", silent=True)
         if ok_button:
             ok_button.click_input()
-            logging.info("비밀번호 입력 안내창의 확인 버튼을 클릭하였습니다.")
+            logging.debug("비밀번호 입력 안내창 확인 클릭")
             set_focus_and_type(None, f"+{{TAB}}{password}{{ENTER}}")
-            logging.info("비밀번호를 입력하였습니다.")
+            logging.debug("비밀번호 입력 완료")
 
             # 비밀번호 오류 모달 체크 ("비밀번호를 확인후 다시 입력하십시오")
             # 메인 "iMeritz" 창이 아닌 정확히 "Meritz" 제목의 별도 모달만 찾음
@@ -368,7 +370,7 @@ def _handle_password_dialog(main_window, password):
                     err_ok = find_control_by_criteria(pw_error, "Button", title="확인", silent=True, delay=0)
                     if err_ok:
                         err_ok.click_input()
-                        logging.info("비밀번호 오류 안내 모달의 확인 버튼을 클릭하였습니다.")
+                        logging.debug("비밀번호 오류 모달 확인 클릭")
             except Exception:
                 pass
         else:
