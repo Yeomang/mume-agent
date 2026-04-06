@@ -70,11 +70,17 @@ def save_data_stock_balance(selected_user, account_index):
     logging.info(f"{selected_user}님의 {account_index}번째 계좌번호를 선택하였습니다.")
 
     # '조회' 버튼 클릭
-    find_control_by_criteria(main_window, "Button", automation_id=AUTO_ID_INQUIRY_BUTTON).click_input()
+    inquiry_btn = find_control_by_criteria(main_window, "Button", automation_id=AUTO_ID_INQUIRY_BUTTON)
+    if not inquiry_btn:
+        raise Exception("조회 버튼을 찾을 수 없습니다.")
+    inquiry_btn.click_input()
     logging.info(f"'조회' 버튼을 클릭하였습니다.")
 
     # 데이터 테이블 위치 찾기
-    rect = find_control_by_criteria(main_window, "Pane", automation_id=AUTO_ID_TABLE_BALANCE).rectangle()
+    table_pane = find_control_by_criteria(main_window, "Pane", automation_id=AUTO_ID_TABLE_BALANCE, delay=2, retries=5)
+    if not table_pane:
+        raise Exception("보유잔고 데이터 테이블을 찾을 수 없습니다.")
+    rect = table_pane.rectangle()
 
     # 테이블의 첫 번째의 행 좌표 계산(대충) 후 우클릭
     table_width = rect.right - rect.left

@@ -54,7 +54,10 @@ def save_orders_history(selected_user, account_index):
         raise Exception("[06100] 해외주식 주문 창을 찾을 수 없습니다.")
 
     # 계좌 선택
-    find_control_by_criteria(order_window, "Pane", automation_id=AUTO_ID_DROPDOWN_ACCOUNT, index=CTRL_INDEX_DROPDOWN_ACCOUNT).click_input()
+    dropdown = find_control_by_criteria(order_window, "Pane", automation_id=AUTO_ID_DROPDOWN_ACCOUNT, index=CTRL_INDEX_DROPDOWN_ACCOUNT)
+    if not dropdown:
+        raise Exception("계좌 드롭다운을 찾을 수 없습니다.")
+    dropdown.click_input()
     send_keys(f"{{PGUP}}{{DOWN {account_index}}}{{ENTER}}")
     logging.info(f"{selected_user}님의 {account_index}번째 계좌번호를 선택하였습니다.")
 
@@ -64,11 +67,17 @@ def save_orders_history(selected_user, account_index):
     # 주문체결 탭 클릭
     logging.info(f"주문체결 탭 버튼 찾는 중...")
     tab_sell = find_control_by_criteria(main_window, "TabItem", title="주문체결")
+    if not tab_sell:
+        raise Exception("주문체결 탭을 찾을 수 없습니다.")
     tab_sell.click_input()
     logging.info(f"주문체결 탭을 클릭하였습니다.")
+    time.sleep(1)
 
     # 데이터 테이블 위치 찾기
-    rect = find_control_by_criteria(main_window, "Pane", automation_id=AUTO_ID_TABLE_ORDER, index=CTRL_INDEX_TABLE_ORDER).rectangle()
+    table_pane = find_control_by_criteria(main_window, "Pane", automation_id=AUTO_ID_TABLE_ORDER, index=CTRL_INDEX_TABLE_ORDER, delay=2, retries=5)
+    if not table_pane:
+        raise Exception("주문체결 데이터 테이블을 찾을 수 없습니다.")
+    rect = table_pane.rectangle()
 
     # 테이블의 첫 번째의 행 좌표 계산(대충) 후 우클릭
     table_width = rect.right - rect.left

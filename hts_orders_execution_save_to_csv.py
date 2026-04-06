@@ -55,39 +55,46 @@ def save_data_order_execution(selected_user, account_index, inquiry_start_date=N
         raise Exception("[06114] 해외주식 주문체결내역 창을 찾을 수 없습니다.")
 
     # 계좌 선택
-    find_control_by_criteria(order_window, "Pane", automation_id=AUTO_ID_DROPDOWN_ACCOUNT).click_input()
+    dropdown = find_control_by_criteria(order_window, "Pane", automation_id=AUTO_ID_DROPDOWN_ACCOUNT)
+    if not dropdown:
+        raise Exception("계좌 드롭다운을 찾을 수 없습니다.")
+    dropdown.click_input()
     send_keys(f"{{PGUP}}{{DOWN {account_index}}}{{ENTER}}")
     logging.info(f"{selected_user}님의 {account_index}번째 계좌번호를 선택하였습니다.")
 
-    # 조회기간 입력    
+    # 조회기간 입력
     inquiry_start_date_input = find_control_by_criteria(main_window, "Pane", automation_id=AUTO_ID_INQUIRY_START_DATE)
     set_focus_and_type(inquiry_start_date_input, inquiry_start_date)
     inquiry_end_date_input = find_control_by_criteria(main_window, "Pane", automation_id=AUTO_ID_INQUIRY_END_DATE)
     set_focus_and_type(inquiry_end_date_input, inquiry_end_date)
     logging.info(f"조회기간 입력 : {inquiry_start_date}-{inquiry_end_date}")
 
-    # # 체결구분 선택
-    # execution_class_button_area = find_control_by_criteria(main_window, "Button", automation_id=AUTO_ID_EXECUTION_CLASS_BUTTON_AREA)
-    # execution_only_button = find_control_by_criteria(execution_class_button_area, "Button", automation_id="2")
-    # execution_only_button.click_input()
-    # logging.info(f"체결구분에서 '체결' 버튼을 클릭하였습니다.")
-    
     # 정렬구분 선택
     sort_option_button_area = find_control_by_criteria(main_window, "Button", automation_id=AUTO_ID_SORT_OPTION_BUTTON_AREA)
-    ascending_button = find_control_by_criteria(sort_option_button_area, "Button", automation_id="2")
-    ascending_button.click_input()
-    logging.info(f"정렬구분에서 '정순' 버튼을 클릭하였습니다.")
+    if sort_option_button_area:
+        ascending_button = find_control_by_criteria(sort_option_button_area, "Button", automation_id="2")
+        if ascending_button:
+            ascending_button.click_input()
+            logging.info(f"정렬구분에서 '정순' 버튼을 클릭하였습니다.")
 
     # '연속조회' 체크박스 체크
-    find_control_by_criteria(main_window, "Button", automation_id=AUTO_ID_CONTINUOUS_INQUIRY_CHECKBOX).click_input()
-    logging.info(f"'연속조회' 체크박스 버튼을 클릭하였습니다.")
+    cont_chk = find_control_by_criteria(main_window, "Button", automation_id=AUTO_ID_CONTINUOUS_INQUIRY_CHECKBOX)
+    if cont_chk:
+        cont_chk.click_input()
+        logging.info(f"'연속조회' 체크박스 버튼을 클릭하였습니다.")
 
     # '조회' 버튼 클릭
-    find_control_by_criteria(main_window, "Button", automation_id=AUTO_ID_INQUIRY_BUTTON).click_input()
+    inquiry_btn = find_control_by_criteria(main_window, "Button", automation_id=AUTO_ID_INQUIRY_BUTTON)
+    if not inquiry_btn:
+        raise Exception("조회 버튼을 찾을 수 없습니다.")
+    inquiry_btn.click_input()
     logging.info(f"'조회' 버튼을 클릭하였습니다.")
 
     # 데이터 테이블 위치 찾기
-    rect = find_control_by_criteria(main_window, "Pane", automation_id=AUTO_ID_TABLE_INQUIRY).rectangle()
+    table_pane = find_control_by_criteria(main_window, "Pane", automation_id=AUTO_ID_TABLE_INQUIRY, delay=2, retries=5)
+    if not table_pane:
+        raise Exception("주문체결내역 데이터 테이블을 찾을 수 없습니다.")
+    rect = table_pane.rectangle()
 
     # 테이블의 첫 번째의 행 좌표 계산(대충) 후 우클릭
     table_width = rect.right - rect.left
