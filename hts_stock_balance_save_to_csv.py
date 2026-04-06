@@ -56,11 +56,16 @@ def save_data_stock_balance(selected_user, account_index):
     set_focus_and_type(search_input, SCREEN_NUM_BALANCE)
     logging.info("'해외주식 보유잔고' 창을 띄웠습니다.")
 
-    # 해외주식 주문체결내역 창 접근
-    order_window = find_control_by_criteria(main_window, "Window", title="[06104] 해외주식 보유잔고")
+    # 해외주식 보유잔고 창 접근 (delay 늘려서 창 로딩 대기)
+    order_window = find_control_by_criteria(main_window, "Window", title="[06104] 해외주식 보유잔고", delay=2, retries=5)
+    if not order_window:
+        raise Exception("[06104] 해외주식 보유잔고 창을 찾을 수 없습니다.")
 
     # 계좌 선택
-    find_control_by_criteria(order_window, "Pane", automation_id=AUTO_ID_DROPDOWN_ACCOUNT).click_input()
+    dropdown = find_control_by_criteria(order_window, "Pane", automation_id=AUTO_ID_DROPDOWN_ACCOUNT)
+    if not dropdown:
+        raise Exception("계좌 드롭다운을 찾을 수 없습니다.")
+    dropdown.click_input()
     send_keys(f"{{PGUP}}{{DOWN {account_index}}}{{ENTER}}")
     logging.info(f"{selected_user}님의 {account_index}번째 계좌번호를 선택하였습니다.")
 

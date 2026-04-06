@@ -69,7 +69,9 @@ def hts_cancel_orders(selected_user, account_index, is_test_mode):
         logging.info("'해외주식 주문' 창을 띄웠습니다.")
 
         # 해외주식 주문 창 접근
-        order_window = find_control_by_criteria(main_window, "Window", title="[06100] 해외주식 주문") 
+        order_window = find_control_by_criteria(main_window, "Window", title="[06100] 해외주식 주문", delay=2, retries=5)
+        if not order_window:
+            raise Exception("[06100] 해외주식 주문 창을 찾을 수 없습니다.")
         
         # 계좌번호 드롭다운 클릭
         logging.info(f"{selected_user}님의 {account_index}번째 계좌번호 선택 중...")

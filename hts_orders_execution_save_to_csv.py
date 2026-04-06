@@ -50,7 +50,9 @@ def save_data_order_execution(selected_user, account_index, inquiry_start_date=N
     logging.info("'해외주식 주문체결내역' 창을 띄웠습니다.")
     
     # 해외주식 주문체결내역 창 접근
-    order_window = find_control_by_criteria(main_window, "Window", title="[06114] 해외주식 주문체결내역")
+    order_window = find_control_by_criteria(main_window, "Window", title="[06114] 해외주식 주문체결내역", delay=2, retries=5)
+    if not order_window:
+        raise Exception("[06114] 해외주식 주문체결내역 창을 찾을 수 없습니다.")
 
     # 계좌 선택
     find_control_by_criteria(order_window, "Pane", automation_id=AUTO_ID_DROPDOWN_ACCOUNT).click_input()

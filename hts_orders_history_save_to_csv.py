@@ -49,7 +49,9 @@ def save_orders_history(selected_user, account_index):
     logging.info("'해외주식 주문' 창을 띄웠습니다.")
 
     # 해외주식 주문 창 접근
-    order_window = find_control_by_criteria(main_window, "Window", title="[06100] 해외주식 주문")    
+    order_window = find_control_by_criteria(main_window, "Window", title="[06100] 해외주식 주문", delay=2, retries=5)
+    if not order_window:
+        raise Exception("[06100] 해외주식 주문 창을 찾을 수 없습니다.")
 
     # 계좌 선택
     find_control_by_criteria(order_window, "Pane", automation_id=AUTO_ID_DROPDOWN_ACCOUNT, index=CTRL_INDEX_DROPDOWN_ACCOUNT).click_input()
