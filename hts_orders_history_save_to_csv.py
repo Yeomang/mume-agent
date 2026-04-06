@@ -71,7 +71,7 @@ def save_orders_history(selected_user, account_index):
         raise Exception("주문체결 탭을 찾을 수 없습니다.")
     tab_sell.click_input()
     logging.info(f"주문체결 탭을 클릭하였습니다.")
-    time.sleep(1)
+    time.sleep(2)  # 탭 전환 후 데이터 로딩 대기
 
     # 데이터 테이블 위치 찾기
     table_pane = find_control_by_criteria(main_window, "Pane", automation_id=AUTO_ID_TABLE_ORDER, index=CTRL_INDEX_TABLE_ORDER, delay=2, retries=5)

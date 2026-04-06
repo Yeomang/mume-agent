@@ -89,6 +89,7 @@ def save_data_order_execution(selected_user, account_index, inquiry_start_date=N
         raise Exception("조회 버튼을 찾을 수 없습니다.")
     inquiry_btn.click_input()
     logging.info(f"'조회' 버튼을 클릭하였습니다.")
+    time.sleep(2)  # 조회 결과 로딩 대기
 
     # 데이터 테이블 위치 찾기
     table_pane = find_control_by_criteria(main_window, "Pane", automation_id=AUTO_ID_TABLE_INQUIRY, delay=2, retries=5)
