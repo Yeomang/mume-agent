@@ -149,6 +149,8 @@ def hts_orders_from_supabase(
         method_ver = cycle.get("method", "")
         ticker = cycle.get("stock_code", "")
 
+        from utils import set_log_context, _log_context
+        set_log_context(job=_log_context.get("job", ""), user=selected_user, account=account_index, cycle=f"{cycle_seq} {ticker}")
         logging.info(f">>>>> 사이클 #{cycle_seq} 매도/매수 진행중... ({len(active_cycles)}개 사이클 중 {iternum}번째)")
         logging.info(f"주문 실행할 종목 : {ticker}")
         logging.info(f"적용 방법론 : {method_ver}")

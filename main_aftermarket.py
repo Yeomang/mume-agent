@@ -7,6 +7,7 @@ import logging
 import traceback
 import sys
 
+from utils import set_log_context, install_log_context_filter
 from hts_login import hts_login
 from hts_orders_execution_save_to_csv import save_data_order_execution
 from order_execution_data_preprocessing import order_execution_data_preprocessing
@@ -29,6 +30,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     encoding="utf-8",
 )
+install_log_context_filter()
 
 def log_uncaught_exceptions(exctype, value, tb):
     """전역(마지막까지 처리 안 된) 예외를 모두 log.log에 traceback 포함해서 기록"""
@@ -100,16 +102,19 @@ def run_aftermarket_job(is_test_mode: bool = False, manual: bool = False):
     # ─────────────────────────────────────
     # 3) 메인 플로우
     # ─────────────────────────────────────
+    set_log_context(job="aftermarket")
     logging.info(f"자동실행대상: {user_accounts}")
     for user, account_items in user_accounts.items():
         if not account_items:
             continue
 
+        set_log_context(job="aftermarket", user=user)
         hts_login(exe_path, user)
 
         for item in account_items:
             account_index = item["account"]
             cycles = item.get("cycles")
+            set_log_context(job="aftermarket", user=user, account=account_index)
 
             if inquiry_start_date and inquiry_end_date:
                 save_data_order_execution(user, account_index, inquiry_start_date, inquiry_end_date)
@@ -135,6 +140,7 @@ def run_aftermarket_job(is_test_mode: bool = False, manual: bool = False):
                 )
 
         kill_window_by_title(hts_window_name)
+    set_log_context()
 
 
 def main():

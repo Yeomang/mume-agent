@@ -7,6 +7,7 @@ import logging
 import traceback
 import sys
 
+from utils import set_log_context, install_log_context_filter
 from hts_login import hts_login
 from hts_cancel_orders import hts_cancel_orders
 from utils import kill_window_by_title, send_telegram_message
@@ -27,6 +28,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     encoding="utf-8",
 )
+install_log_context_filter()
 
 def log_uncaught_exceptions(exctype, value, tb):
     """전역(마지막까지 처리 안 된) 예외를 모두 log.log에 traceback 포함해서 기록"""
@@ -98,6 +100,7 @@ def run_cancel_orders_job(is_test_mode: bool = False, manual: bool = False):
     TELEGRAM_BOT_TOKEN = Config.TELEGRAM_BOT_TOKEN_ORDER
     TELEGRAM_CHAT_ID = Config.TELEGRAM_CHAT_ID
 
+    set_log_context(job="cancel")
     logging.info(f"자동실행대상: {user_accounts}")
     results = []  # 결과 수집용
 
@@ -105,11 +108,13 @@ def run_cancel_orders_job(is_test_mode: bool = False, manual: bool = False):
         if not account_items:
             continue
 
+        set_log_context(job="cancel", user=user)
         # 공동인증서 로그인
         hts_login(exe_path, user)
 
         for item in account_items:
             account_index = item["account"]
+            set_log_context(job="cancel", user=user, account=account_index)
 
             logging.info(f">>>>> {user}님의 {account_index}번 계좌 미체결 주문 일괄 취소 시작 <<<<<")
 
@@ -132,6 +137,7 @@ def run_cancel_orders_job(is_test_mode: bool = False, manual: bool = False):
 
         # HTS 프로그램 종료
         kill_window_by_title(hts_window_name)
+    set_log_context()
 
     # ─────────────────────────────────────
     # 4) 텔레그램 알림 전송

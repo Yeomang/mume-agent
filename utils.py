@@ -15,6 +15,46 @@ _IS_WINDOWS = platform.system() == "Windows"
 
 
 # ─────────────────────────────────────
+# 로그 컨텍스트 prefix (전역)
+# ─────────────────────────────────────
+
+_log_context = {"job": "", "user": "", "account": "", "cycle": ""}
+
+
+class _LogContextFilter(logging.Filter):
+    """로그 메시지 앞에 현재 작업 컨텍스트를 자동 추가."""
+    def filter(self, record):
+        parts = []
+        if _log_context["job"]:
+            parts.append(_log_context["job"])
+        if _log_context["user"]:
+            parts.append(_log_context["user"])
+        if _log_context["account"]:
+            parts.append(f'{_log_context["account"]}번')
+        if _log_context["cycle"]:
+            parts.append(f'#{_log_context["cycle"]}')
+        if parts:
+            record.msg = f"[{' | '.join(parts)}] {record.msg}"
+        return True
+
+
+def set_log_context(job="", user="", account="", cycle=""):
+    """로그 prefix 컨텍스트를 설정. 빈 문자열이면 해당 항목 제거."""
+    _log_context["job"] = str(job) if job else ""
+    _log_context["user"] = str(user) if user else ""
+    _log_context["account"] = str(account) if account else ""
+    _log_context["cycle"] = str(cycle) if cycle else ""
+
+
+def install_log_context_filter():
+    """root logger에 컨텍스트 필터를 설치. main_*.py에서 한번만 호출."""
+    root = logging.getLogger()
+    # 중복 설치 방지
+    if not any(isinstance(f, _LogContextFilter) for f in root.filters):
+        root.addFilter(_LogContextFilter())
+
+
+# ─────────────────────────────────────
 # RDP 세션 유지 (GUI 자동화에 필수)
 # ─────────────────────────────────────
 
