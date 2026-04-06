@@ -150,6 +150,7 @@ def setup_logging(log_file: str = "log.log", level: int = logging.INFO) -> None:
     logging.basicConfig(
         level=level,
         format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[
             logging.StreamHandler(),
             logging.FileHandler(log_file, encoding="utf-8")
