@@ -120,9 +120,12 @@ def run_cancel_orders_job(is_test_mode: bool = False, manual: bool = False):
                 is_test_mode,
             )
 
-            if success:
+            if success and error == "미체결 주문 없음":
+                logging.info(f"[{user} | {account_index}번 계좌] 미체결 주문 없음")
+                results.append(f"ℹ️ {user} | {account_index}번 계좌: 미체결 주문 없음")
+            elif success:
                 logging.info(f"[{user} | {account_index}번 계좌] 미체결 주문 일괄 취소 성공")
-                results.append(f"✅ {user} | {account_index}번 계좌: 성공")
+                results.append(f"✅ {user} | {account_index}번 계좌: 취소 완료")
             else:
                 logging.error(f"[{user} | {account_index}번 계좌] 미체결 주문 일괄 취소 실패: {error}")
                 results.append(f"❌ {user} | {account_index}번 계좌: 실패 - {error}")
