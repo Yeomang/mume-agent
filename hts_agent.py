@@ -265,11 +265,16 @@ def run_job(
             pass
 
     with PROC_LOCK:
-        _update_status_from_proc(job)
+        # 모든 작업의 실행 상태 갱신
+        for j in JOB_CONFIG:
+            _update_status_from_proc(j)
 
-        if CURRENT_PROC[job] is not None:
-            write_log("START_REJECTED", job, "already running")
-            raise HTTPException(status_code=409, detail=f"{JOB_LABEL.get(job, job)} 작업이 이미 실행 중입니다.")
+        # 다른 작업이 실행 중인지 확인 (HTS GUI를 공유하므로 동시 실행 불가)
+        running = [j for j in JOB_CONFIG if CURRENT_PROC[j] is not None]
+        if running:
+            running_labels = ", ".join(JOB_LABEL.get(j, j) for j in running)
+            write_log("START_REJECTED", job, f"other job running: {running}")
+            raise HTTPException(status_code=409, detail=f"현재 {running_labels} 작업이 실행 중입니다. 완료 후 다시 시도하거나, 먼저 중지해주세요.")
 
         script_path = JOB_CONFIG[job]["script"]
         if not script_path.exists():
