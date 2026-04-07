@@ -57,7 +57,8 @@ def _clear_order_status(user_name: str, account_index: int):
             timeout=10.0,
         )
         data = resp.json()
-        logging.info(f"[order-status] 취소 후 정리: {data.get('deleted', 0)}건 삭제")
+        debug = data.get('debug', '')
+        logging.info(f"[order-status] 취소 후 정리: {data.get('deleted', 0)}건 삭제 ({debug})")
     except Exception as e:
         logging.warning(f"[order-status] 취소 후 정리 실패: {e}")
 
