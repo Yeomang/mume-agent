@@ -407,6 +407,38 @@ def processes():
     return _get_process_status()
 
 
+@app.get("/monitor")
+def monitor(job: str, max_lines: int = 300):
+    """status + logs + processes를 한 번에 반환 (폴링 최적화)."""
+    _ensure_valid_job(job)
+    _update_status_from_proc(job)
+
+    # logs
+    log_text = "(로그 파일 없음)"
+    if LOG_FILE.exists():
+        try:
+            max_bytes = 200_000
+            with LOG_FILE.open("rb") as f:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                f.seek(max(0, size - max_bytes))
+                data = f.read()
+            try:
+                text = data.decode("utf-8", errors="ignore")
+            except UnicodeDecodeError:
+                text = data.decode("cp949", errors="ignore")
+            lines = text.splitlines()
+            log_text = "\n".join(lines[-max_lines:]) or "(로그 없음)"
+        except Exception as e:
+            log_text = f"(로그 읽기 오류: {e})"
+
+    return {
+        "status": LAST_STATUS[job],
+        "logs": {"text": log_text},
+        "processes": _get_process_status(),
+    }
+
+
 # ─────────────────────────────────────
 # 비밀번호 관리
 # ─────────────────────────────────────
