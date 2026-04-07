@@ -67,64 +67,78 @@ def _trigger_recompute(cycle_id: int):
         return False
 
 
-def _update_order_status_filled(sb, cycle_id: int, auth_user_id: str, executed_trades: list):
+def _sync_order_status(sb, cycle_id: int, auth_user_id: str, all_orders_df, trade_date: str):
     """
-    체결된 주문에 매칭되는 order_status를 ordered → filled로 업데이트.
-    매칭되는 order_status가 없으면(evening job 기록 누락 등) filled로 새로 생성.
+    CSV의 전체 주문내역(체결+미체결)을 기준으로 order_status를 동기화.
+    - 기존 ordered 중 체결된 건 → filled로 업데이트
+    - order_status에 없는 주문 → 신규 생성 (filled 또는 ordered)
     """
+    if all_orders_df is None or all_orders_df.empty:
+        return
     try:
-        # 해당 사이클의 ordered 상태 레코드 조회
+        # 해당 사이클의 기존 order_status 조회 (ordered + filled 모두)
         os_res = (
             sb.table("order_status")
-            .select("id, side, price")
+            .select("id, side, price, status")
             .eq("cycle_id", cycle_id)
-            .eq("status", "ordered")
+            .gte("order_date", trade_date)
             .execute()
         )
         os_rows = os_res.data or []
 
-        filled_ids = []
-        unmatched_trades = []
-        for trade in executed_trades:
-            qty = trade.get("execution_qty", 0)
-            price = trade.get("execution_price", 0)
-            side = "buy" if qty > 0 else "sell"
-            matched = False
+        update_to_filled = []  # ordered → filled
+        new_rows = []  # 신규 생성
+
+        for _, row in all_orders_df.iterrows():
+            raw_side = row.get("주문구분", "")
+            side = "buy" if raw_side == "매수" else "sell"
+            order_price = float(row.get("주문단가", 0))
+            exec_qty = int(row.get("체결수량", 0))
+            is_filled = exec_qty != 0
+            target_status = "filled" if is_filled else "ordered"
+
+            # 기존 order_status에서 매칭 찾기
+            matched_os = None
             for os_row in os_rows:
-                if os_row["id"] in filled_ids:
+                if os_row["id"] in update_to_filled:
                     continue
-                if os_row["side"] == side and abs(float(os_row["price"]) - price) < 0.5:
-                    filled_ids.append(os_row["id"])
-                    matched = True
+                if os_row["side"] == side and abs(float(os_row["price"]) - order_price) < 0.5:
+                    matched_os = os_row
                     break
-            if not matched:
-                unmatched_trades.append(trade)
 
-        # 매칭된 건: ordered → filled 업데이트
-        if filled_ids:
-            sb.table("order_status").update({"status": "filled"}).in_("id", filled_ids).execute()
-            logging.info(f"[order-status] 사이클 {cycle_id}: {len(filled_ids)}건 filled 업데이트")
-
-        # 매칭 안 된 건: filled로 신규 생성 (evening job 기록 누락 보정)
-        if unmatched_trades:
-            new_rows = []
-            for trade in unmatched_trades:
-                qty = trade.get("execution_qty", 0)
-                price = trade.get("execution_price", 0)
+            if matched_os:
+                # 기존 레코드 있음 — 상태 업데이트 필요한지 확인
+                if matched_os["status"] == "ordered" and is_filled:
+                    update_to_filled.append(matched_os["id"])
+            else:
+                # 기존 레코드 없음 — 신규 생성
+                order_cond = row.get("주문조건", "")
+                if order_cond == "LOC":
+                    ot = "loc_buy" if side == "buy" else "loc_sell"
+                else:
+                    ot = "limit_buy" if side == "buy" else "limit_sell"
                 new_rows.append({
                     "auth_user_id": auth_user_id,
                     "cycle_id": cycle_id,
-                    "order_type": "unknown",
-                    "side": "buy" if qty > 0 else "sell",
-                    "qty": abs(qty),
-                    "price": price,
-                    "status": "filled",
-                    "order_date": trade.get("trade_date"),
+                    "order_type": ot,
+                    "side": side,
+                    "qty": abs(int(row.get("주문수량", 0))),
+                    "price": order_price,
+                    "status": target_status,
+                    "order_date": trade_date,
                 })
+
+        if update_to_filled:
+            sb.table("order_status").update({"status": "filled"}).in_("id", update_to_filled).execute()
+            logging.info(f"[order-status] 사이클 {cycle_id}: {len(update_to_filled)}건 filled 업데이트")
+
+        if new_rows:
             sb.table("order_status").insert(new_rows).execute()
-            logging.info(f"[order-status] 사이클 {cycle_id}: {len(new_rows)}건 filled 신규 생성")
+            filled_cnt = sum(1 for r in new_rows if r["status"] == "filled")
+            ordered_cnt = len(new_rows) - filled_cnt
+            logging.info(f"[order-status] 사이클 {cycle_id}: 신규 {len(new_rows)}건 (체결 {filled_cnt}, 미체결 {ordered_cnt})")
     except Exception as e:
-        logging.warning(f"[order-status] filled 업데이트 실패: {e}")
+        logging.warning(f"[order-status] 동기화 실패: {e}")
 
 
 def orders_execution_update_supabase(
@@ -235,43 +249,47 @@ def orders_execution_update_supabase(
                 )
                 send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message)
 
+        # 주문일자 → trade_date 변환
+        trade_date = None
+        if not filtered_df.empty and not pd.isnull(filtered_df.iloc[0]['주문일자']):
+            trade_date = pd.to_datetime(filtered_df.iloc[0]['주문일자']).strftime('%Y-%m-%d')
+
         # 체결된 것만 추출 (체결수량 != 0)
         only_executed_df = filtered_df[filtered_df['체결수량'] != 0]
-        if only_executed_df.empty:
+        if not only_executed_df.empty:
+            logging.info(f"체결내역 {len(only_executed_df)}건의 데이터가 필터링되었습니다.")
+            logging.info(f"[체결내역 {len(only_executed_df)}건]\n{only_executed_df}")
+        else:
             logging.info("주문내역 중 해당 사이클 종목의 체결내역이 없습니다.")
-            continue
-        logging.info(f"체결내역 {len(only_executed_df)}건의 데이터가 필터링되었습니다.")
-        logging.info(f"[체결내역 {len(only_executed_df)}건]\n{only_executed_df}")
 
-        # Supabase cycle_trades에 INSERT
+        # Supabase cycle_trades에 INSERT + order_status 동기화
         if not is_test_mode:
-            rows_to_insert = []
-            for _, row in only_executed_df.iterrows():
-                trade_date = None
-                if not pd.isnull(row['주문일자']):
-                    dt_obj = pd.to_datetime(row['주문일자'])
-                    trade_date = dt_obj.strftime('%Y-%m-%d')
+            # 체결 건 INSERT
+            if not only_executed_df.empty:
+                rows_to_insert = []
+                for _, row in only_executed_df.iterrows():
+                    td = None
+                    if not pd.isnull(row['주문일자']):
+                        td = pd.to_datetime(row['주문일자']).strftime('%Y-%m-%d')
+                    rows_to_insert.append({
+                        "cycle_id": cycle_id,
+                        "trade_date": td,
+                        "execution_price": float(row['체결단가']),
+                        "execution_qty": int(row['체결수량']),
+                        "event_type": "TRADE",
+                    })
 
-                rows_to_insert.append({
-                    "cycle_id": cycle_id,
-                    "trade_date": trade_date,
-                    "execution_price": float(row['체결단가']),
-                    "execution_qty": int(row['체결수량']),
-                    "event_type": "TRADE",
-                })
+                try:
+                    sb.table("cycle_trades").insert(rows_to_insert).execute()
+                    logging.info(f"{len(rows_to_insert)}건의 체결내역을 cycle_trades에 INSERT 완료!")
+                except Exception as e:
+                    logging.error(f"cycle_trades INSERT 실패: {e}")
 
-            try:
-                sb.table("cycle_trades").insert(rows_to_insert).execute()
-                logging.info(f"{len(rows_to_insert)}건의 체결내역을 cycle_trades에 INSERT 완료!")
-            except Exception as e:
-                logging.error(f"cycle_trades INSERT 실패: {e}")
-                continue
+                # recompute 트리거
+                _trigger_recompute(cycle_id)
 
-            # 체결된 주문의 order_status를 filled로 업데이트
-            _update_order_status_filled(sb, cycle_id, cycle.get("auth_user_id", ""), rows_to_insert)
-
-            # recompute 트리거
-            _trigger_recompute(cycle_id)
+            # order_status 동기화 (전체 주문내역 기준: 체결 + 미체결)
+            _sync_order_status(sb, cycle_id, cycle.get("auth_user_id", ""), filtered_df, trade_date)
         else:
             for _, row in only_executed_df.iterrows():
                 order_date = pd.to_datetime(row['주문일자'], format='%Y-%m-%d', errors='coerce')
