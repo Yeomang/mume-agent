@@ -86,7 +86,7 @@ def _sync_order_status(sb, cycle_id: int, auth_user_id: str, all_orders_df, trad
         )
         os_rows = os_res.data or []
 
-        update_to_filled = []  # ordered → filled
+        update_filled = []  # (id, execution_price) — ordered → filled
         new_rows = []  # 신규 생성
 
         for _, row in all_orders_df.iterrows():
@@ -94,22 +94,24 @@ def _sync_order_status(sb, cycle_id: int, auth_user_id: str, all_orders_df, trad
             side = "buy" if raw_side == "매수" else "sell"
             order_price = float(row.get("주문단가", 0))
             exec_qty = int(row.get("체결수량", 0))
+            exec_price = float(row.get("체결단가", 0)) if exec_qty != 0 else None
             is_filled = exec_qty != 0
             target_status = "filled" if is_filled else "ordered"
 
-            # 기존 order_status에서 매칭 찾기
+            # 기존 order_status에서 매칭 찾기 (주문가 기준)
             matched_os = None
+            used_ids = [u[0] for u in update_filled]
             for os_row in os_rows:
-                if os_row["id"] in update_to_filled:
+                if os_row["id"] in used_ids:
                     continue
                 if os_row["side"] == side and abs(float(os_row["price"]) - order_price) < 0.5:
                     matched_os = os_row
                     break
 
             if matched_os:
-                # 기존 레코드 있음 — 상태 업데이트 필요한지 확인
+                # 기존 레코드 있음 — 상태/체결가 업데이트
                 if matched_os["status"] == "ordered" and is_filled:
-                    update_to_filled.append(matched_os["id"])
+                    update_filled.append((matched_os["id"], exec_price))
             else:
                 # 기존 레코드 없음 — 신규 생성
                 order_cond = row.get("주문조건", "")
@@ -117,7 +119,7 @@ def _sync_order_status(sb, cycle_id: int, auth_user_id: str, all_orders_df, trad
                     ot = "loc_buy" if side == "buy" else "loc_sell"
                 else:
                     ot = "limit_buy" if side == "buy" else "limit_sell"
-                new_rows.append({
+                new_row = {
                     "auth_user_id": auth_user_id,
                     "cycle_id": cycle_id,
                     "order_type": ot,
@@ -126,11 +128,19 @@ def _sync_order_status(sb, cycle_id: int, auth_user_id: str, all_orders_df, trad
                     "price": order_price,
                     "status": target_status,
                     "order_date": trade_date,
-                })
+                }
+                if exec_price is not None:
+                    new_row["execution_price"] = exec_price
+                new_rows.append(new_row)
 
-        if update_to_filled:
-            sb.table("order_status").update({"status": "filled"}).in_("id", update_to_filled).execute()
-            logging.info(f"[order-status] 사이클 {cycle_id}: {len(update_to_filled)}건 filled 업데이트")
+        # 기존 레코드 업데이트 (개별 — 각각 다른 execution_price)
+        if update_filled:
+            for os_id, ep in update_filled:
+                patch = {"status": "filled"}
+                if ep is not None:
+                    patch["execution_price"] = ep
+                sb.table("order_status").update(patch).eq("id", os_id).execute()
+            logging.info(f"[order-status] 사이클 {cycle_id}: {len(update_filled)}건 filled 업데이트")
 
         if new_rows:
             sb.table("order_status").insert(new_rows).execute()
