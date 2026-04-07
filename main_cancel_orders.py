@@ -14,7 +14,7 @@ from hts_login import hts_login
 from hts_cancel_orders import hts_cancel_orders
 from utils import kill_window_by_title, send_telegram_message
 from job_control import register_job_pid, unregister_job_pid
-from automation_target_store import load_automation_target
+from automation_target_store import load_automation_target, get_auth_user_id_for
 from config import Config
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -42,8 +42,8 @@ def log_uncaught_exceptions(exctype, value, tb):
 sys.excepthook = log_uncaught_exceptions
 
 
-def _clear_order_status(user_name: str, account_index: int):
-    """콘솔에 취소 완료를 알려 당일 order_status를 삭제한다."""
+def _clear_order_status(auth_user_id: str, account_index: int):
+    """콘솔에 취소 완료를 알려 해당 계좌의 order_status를 삭제한다."""
     console_url = Config.CONSOLE_URL.rstrip("/") if Config.CONSOLE_URL else ""
     agent_key = Config.HTS_AGENT_KEY
     if not console_url:
@@ -52,7 +52,7 @@ def _clear_order_status(user_name: str, account_index: int):
     try:
         resp = httpx.post(
             f"{console_url}/api/order-status/clear",
-            json={"user_name": user_name, "account_index": account_index},
+            json={"auth_user_id": auth_user_id, "account_index": account_index},
             headers=headers,
             timeout=10.0,
         )
@@ -133,6 +133,7 @@ def run_cancel_orders_job(is_test_mode: bool = False, manual: bool = False):
             continue
 
         set_log_context(job="cancel", user=user)
+        auth_uid = get_auth_user_id_for(user)
         # 공동인증서 로그인
         hts_login(exe_path, user)
 
@@ -160,8 +161,8 @@ def run_cancel_orders_job(is_test_mode: bool = False, manual: bool = False):
                 results.append(f"❌ {user} | {account_index}번 계좌: 실패 - {error}")
 
             # 성공이면 항상 order_status 정리 (미체결 없음/취소 완료 모두)
-            if success and not is_test_mode:
-                _clear_order_status(user, account_index)
+            if success and not is_test_mode and auth_uid:
+                _clear_order_status(auth_uid, account_index)
 
         # HTS 프로그램 종료
         kill_window_by_title(hts_window_name)

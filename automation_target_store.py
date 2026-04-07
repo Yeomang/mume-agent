@@ -25,6 +25,8 @@ from typing import Any, Dict, List, Tuple
 
 # 모듈 레벨에서 auth_user_id 목록 캐시
 _cached_auth_user_ids: List[str] = []
+# user_name → auth_user_id 매핑 캐시
+_cached_user_auth_map: Dict[str, str] = {}
 
 
 def _load_from_supabase() -> Dict[str, List[int]] | None:
@@ -32,7 +34,7 @@ def _load_from_supabase() -> Dict[str, List[int]] | None:
     Supabase user_accounts 테이블에서 is_automation_target=true인 계좌를 조회.
     조회 실패 시 None을 반환.
     """
-    global _cached_auth_user_ids
+    global _cached_auth_user_ids, _cached_user_auth_map
     try:
         from supabase_client import get_supabase_client
 
@@ -67,6 +69,7 @@ def _load_from_supabase() -> Dict[str, List[int]] | None:
             uid = row.get("auth_user_id")
             if uid:
                 auth_user_ids.add(str(uid))
+                _cached_user_auth_map[name] = str(uid)
 
         _cached_auth_user_ids = list(auth_user_ids)
         logging.info(f"[automation_target] auth_user_ids: {_cached_auth_user_ids}")
@@ -81,6 +84,13 @@ def get_auth_user_ids() -> List[str]:
     if not _cached_auth_user_ids:
         _load_from_supabase()
     return _cached_auth_user_ids
+
+
+def get_auth_user_id_for(user_name: str) -> str | None:
+    """user_name에 대응하는 auth_user_id를 반환."""
+    if not _cached_user_auth_map:
+        _load_from_supabase()
+    return _cached_user_auth_map.get(user_name)
 
 
 def load_automation_target(
