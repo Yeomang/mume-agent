@@ -23,7 +23,7 @@ def _get_active_cycles(sb, selected_user, account_index, auth_user_ids=None, cyc
     uids = auth_user_ids or get_auth_user_ids()
     res = supabase_fetch_all(
         lambda s, e: sb.table("cycle_master")
-        .select("id, cycle_seq, status, method, stock_code")
+        .select("id, cycle_seq, status, method, stock_code, auth_user_id")
         .in_("status", ["진행중", "시작전"])
         .in_("auth_user_id", uids)
         .eq("user_name", selected_user)
@@ -67,8 +67,11 @@ def _trigger_recompute(cycle_id: int):
         return False
 
 
-def _update_order_status_filled(sb, cycle_id: int, executed_trades: list):
-    """체결된 주문에 매칭되는 order_status를 ordered → filled로 업데이트."""
+def _update_order_status_filled(sb, cycle_id: int, auth_user_id: str, executed_trades: list):
+    """
+    체결된 주문에 매칭되는 order_status를 ordered → filled로 업데이트.
+    매칭되는 order_status가 없으면(evening job 기록 누락 등) filled로 새로 생성.
+    """
     try:
         # 해당 사이클의 ordered 상태 레코드 조회
         os_res = (
@@ -79,24 +82,47 @@ def _update_order_status_filled(sb, cycle_id: int, executed_trades: list):
             .execute()
         )
         os_rows = os_res.data or []
-        if not os_rows:
-            return
 
         filled_ids = []
+        unmatched_trades = []
         for trade in executed_trades:
             qty = trade.get("execution_qty", 0)
             price = trade.get("execution_price", 0)
             side = "buy" if qty > 0 else "sell"
+            matched = False
             for os_row in os_rows:
                 if os_row["id"] in filled_ids:
                     continue
                 if os_row["side"] == side and abs(float(os_row["price"]) - price) < 0.5:
                     filled_ids.append(os_row["id"])
+                    matched = True
                     break
+            if not matched:
+                unmatched_trades.append(trade)
 
+        # 매칭된 건: ordered → filled 업데이트
         if filled_ids:
             sb.table("order_status").update({"status": "filled"}).in_("id", filled_ids).execute()
             logging.info(f"[order-status] 사이클 {cycle_id}: {len(filled_ids)}건 filled 업데이트")
+
+        # 매칭 안 된 건: filled로 신규 생성 (evening job 기록 누락 보정)
+        if unmatched_trades:
+            new_rows = []
+            for trade in unmatched_trades:
+                qty = trade.get("execution_qty", 0)
+                price = trade.get("execution_price", 0)
+                new_rows.append({
+                    "auth_user_id": auth_user_id,
+                    "cycle_id": cycle_id,
+                    "order_type": "unknown",
+                    "side": "buy" if qty > 0 else "sell",
+                    "qty": abs(qty),
+                    "price": price,
+                    "status": "filled",
+                    "order_date": trade.get("trade_date"),
+                })
+            sb.table("order_status").insert(new_rows).execute()
+            logging.info(f"[order-status] 사이클 {cycle_id}: {len(new_rows)}건 filled 신규 생성")
     except Exception as e:
         logging.warning(f"[order-status] filled 업데이트 실패: {e}")
 
@@ -242,7 +268,7 @@ def orders_execution_update_supabase(
                 continue
 
             # 체결된 주문의 order_status를 filled로 업데이트
-            _update_order_status_filled(sb, cycle_id, rows_to_insert)
+            _update_order_status_filled(sb, cycle_id, cycle.get("auth_user_id", ""), rows_to_insert)
 
             # recompute 트리거
             _trigger_recompute(cycle_id)

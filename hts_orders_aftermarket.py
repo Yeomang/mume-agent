@@ -8,6 +8,7 @@ from utils import (
     load_csv_if_exists,
 )
 from hts_order_buy import hts_order_buy
+from hts_orders_from_supabase import _record_order_status
 from config import Config
 from supabase_client import get_supabase_client, supabase_fetch_all
 import logging
@@ -186,6 +187,12 @@ def hts_orders_aftermarket(
                         order_type_index,
                         is_test_mode,
                     )
+                    if order_buy_success and not is_test_mode:
+                        _record_order_status(cycle_id, [
+                            {"order_type": "aftermarket_buy", "side": "buy",
+                             "qty": int(o["quantity"]), "price": float(o["price"])}
+                            for o in buy_orders if o.get("quantity") and o.get("price")
+                        ])
                     if order_buy_success:
                         formatted_orders = "\n".join([
                             f"   •  ${float(order['price']):,.2f}  |  {order['quantity']}주  |  보통(지정가)"
