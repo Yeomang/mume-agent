@@ -7,6 +7,8 @@ import logging
 import traceback
 import sys
 
+import httpx
+
 from utils import set_log_context, install_log_context_filter
 from hts_login import hts_login
 from hts_cancel_orders import hts_cancel_orders
@@ -38,6 +40,26 @@ def log_uncaught_exceptions(exctype, value, tb):
 
 # 모든 처리 안 된 예외는 여기로 들어옴
 sys.excepthook = log_uncaught_exceptions
+
+
+def _clear_order_status(user_name: str, account_index: int):
+    """콘솔에 취소 완료를 알려 당일 order_status를 삭제한다."""
+    console_url = Config.CONSOLE_URL.rstrip("/") if Config.CONSOLE_URL else ""
+    agent_key = Config.HTS_AGENT_KEY
+    if not console_url:
+        return
+    headers = {"X-Agent-Key": agent_key} if agent_key else {}
+    try:
+        resp = httpx.post(
+            f"{console_url}/api/order-status/clear",
+            json={"user_name": user_name, "account_index": account_index},
+            headers=headers,
+            timeout=10.0,
+        )
+        data = resp.json()
+        logging.info(f"[order-status] 취소 후 정리: {data.get('deleted', 0)}건 삭제")
+    except Exception as e:
+        logging.warning(f"[order-status] 취소 후 정리 실패: {e}")
 
 
 def run_cancel_orders_job(is_test_mode: bool = False, manual: bool = False):
@@ -132,6 +154,9 @@ def run_cancel_orders_job(is_test_mode: bool = False, manual: bool = False):
             elif success:
                 logging.info(f"[{user} | {account_index}번 계좌] 미체결 주문 일괄 취소 성공")
                 results.append(f"✅ {user} | {account_index}번 계좌: 취소 완료")
+                # 콘솔 order_status 정리 (당일 주문 기록 삭제)
+                if not is_test_mode:
+                    _clear_order_status(user, account_index)
             else:
                 logging.error(f"[{user} | {account_index}번 계좌] 미체결 주문 일괄 취소 실패: {error}")
                 results.append(f"❌ {user} | {account_index}번 계좌: 실패 - {error}")
