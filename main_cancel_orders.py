@@ -155,12 +155,13 @@ def run_cancel_orders_job(is_test_mode: bool = False, manual: bool = False):
             elif success:
                 logging.info(f"[{user} | {account_index}번 계좌] 미체결 주문 일괄 취소 성공")
                 results.append(f"✅ {user} | {account_index}번 계좌: 취소 완료")
-                # 콘솔 order_status 정리 (당일 주문 기록 삭제)
-                if not is_test_mode:
-                    _clear_order_status(user, account_index)
             else:
                 logging.error(f"[{user} | {account_index}번 계좌] 미체결 주문 일괄 취소 실패: {error}")
                 results.append(f"❌ {user} | {account_index}번 계좌: 실패 - {error}")
+
+            # 성공이면 항상 order_status 정리 (미체결 없음/취소 완료 모두)
+            if success and not is_test_mode:
+                _clear_order_status(user, account_index)
 
         # HTS 프로그램 종료
         kill_window_by_title(hts_window_name)
