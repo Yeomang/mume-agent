@@ -13,6 +13,7 @@ from config import Config
 from supabase_client import get_supabase_client, supabase_fetch_all
 import logging
 import traceback
+import httpx
 from hts_orders_history_save_to_csv import save_orders_history
 from order_history_data_preprocessing import order_history_data_preprocessing
 
@@ -40,6 +41,24 @@ def _get_active_cycles(sb, selected_user, account_index, auth_user_ids=None, cyc
     if cycles is not None:
         rows = [r for r in rows if r["cycle_seq"] in cycles]
     return rows
+
+
+def _record_order_status(cycle_id: int, orders: list):
+    """콘솔에 주문 상태를 기록한다."""
+    console_url = Config.CONSOLE_URL.rstrip("/") if Config.CONSOLE_URL else ""
+    agent_key = Config.HTS_AGENT_KEY
+    if not console_url:
+        return
+    headers = {"X-Agent-Key": agent_key} if agent_key else {}
+    try:
+        httpx.post(
+            f"{console_url}/api/order-status",
+            json={"cycle_id": cycle_id, "orders": orders},
+            headers=headers,
+            timeout=10.0,
+        )
+    except Exception as e:
+        logging.warning(f"[order-status] 기록 실패: {e}")
 
 
 def _get_latest_computed(sb, cycle_id):
@@ -244,7 +263,13 @@ def hts_orders_from_supabase(
             and str(order["price"]).strip() not in invalid_values
         ]
         if sell_orders:
-            hts_order_sell(selected_user, account_index, ticker, sell_orders, is_test_mode)
+            sell_success, sell_err = hts_order_sell(selected_user, account_index, ticker, sell_orders, is_test_mode)
+            if sell_success and not is_test_mode:
+                _record_order_status(cycle_id, [
+                    {"order_type": o.get("order_type_index", 0) == 0 and "limit_sell" or "loc_sell",
+                     "side": "sell", "qty": int(o["quantity"]), "price": float(o["price"])}
+                    for o in sell_orders
+                ])
         else:
             logging.info(">>>>> 매도할 데이터가 없으므로 주문을 SKIP합니다. <<<<<")
 
@@ -255,7 +280,13 @@ def hts_orders_from_supabase(
             and str(order["price"]).strip() not in invalid_values
         ]
         if buy_orders:
-            hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_index, is_test_mode)
+            buy_success, buy_err = hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_index, is_test_mode)
+            if buy_success and not is_test_mode:
+                _record_order_status(cycle_id, [
+                    {"order_type": "loc_buy", "side": "buy",
+                     "qty": int(o["quantity"]), "price": float(o["price"])}
+                    for o in buy_orders if o.get("quantity") and o.get("price")
+                ])
         else:
             logging.info(">>>>> 매수할 데이터가 없으므로 주문을 SKIP합니다. <<<<<")
 
