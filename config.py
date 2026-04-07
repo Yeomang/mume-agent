@@ -15,7 +15,7 @@ BASE_DIR = Path(__file__).resolve().parent
 ENV_FILE = BASE_DIR / ".env"
 
 if ENV_FILE.exists():
-    load_dotenv(ENV_FILE)
+    load_dotenv(ENV_FILE, encoding="utf-8-sig")
 else:
     logging.warning(f"[config] .env 파일을 찾을 수 없습니다: {ENV_FILE}")
 
