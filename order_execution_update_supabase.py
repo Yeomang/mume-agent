@@ -67,6 +67,40 @@ def _trigger_recompute(cycle_id: int):
         return False
 
 
+def _update_order_status_filled(sb, cycle_id: int, executed_trades: list):
+    """체결된 주문에 매칭되는 order_status를 ordered → filled로 업데이트."""
+    try:
+        # 해당 사이클의 ordered 상태 레코드 조회
+        os_res = (
+            sb.table("order_status")
+            .select("id, side, price")
+            .eq("cycle_id", cycle_id)
+            .eq("status", "ordered")
+            .execute()
+        )
+        os_rows = os_res.data or []
+        if not os_rows:
+            return
+
+        filled_ids = []
+        for trade in executed_trades:
+            qty = trade.get("execution_qty", 0)
+            price = trade.get("execution_price", 0)
+            side = "buy" if qty > 0 else "sell"
+            for os_row in os_rows:
+                if os_row["id"] in filled_ids:
+                    continue
+                if os_row["side"] == side and abs(float(os_row["price"]) - price) < 0.5:
+                    filled_ids.append(os_row["id"])
+                    break
+
+        if filled_ids:
+            sb.table("order_status").update({"status": "filled"}).in_("id", filled_ids).execute()
+            logging.info(f"[order-status] 사이클 {cycle_id}: {len(filled_ids)}건 filled 업데이트")
+    except Exception as e:
+        logging.warning(f"[order-status] filled 업데이트 실패: {e}")
+
+
 def orders_execution_update_supabase(
     selected_user,
     account_index,
@@ -206,6 +240,9 @@ def orders_execution_update_supabase(
             except Exception as e:
                 logging.error(f"cycle_trades INSERT 실패: {e}")
                 continue
+
+            # 체결된 주문의 order_status를 filled로 업데이트
+            _update_order_status_filled(sb, cycle_id, rows_to_insert)
 
             # recompute 트리거
             _trigger_recompute(cycle_id)

@@ -16,8 +16,9 @@ from hts_stock_balance_save_to_csv import save_data_stock_balance
 from stock_balance_data_preprocessing import stock_balance_data_preprocessing
 from utils import kill_window_by_title, to_yyyymmdd
 from job_control import register_job_pid, unregister_job_pid
-from automation_target_store import load_automation_target
+from automation_target_store import load_automation_target, get_auth_user_ids
 from config import Config
+import datetime as dt
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -157,6 +158,35 @@ def run_morning_job(is_test_mode: bool = False, manual: bool = False):
 
         kill_window_by_title(hts_window_name)
     set_log_context()
+
+    # 2주 이상 된 order_status 정리
+    _cleanup_old_order_status()
+
+
+def _cleanup_old_order_status():
+    """2주 이상 된 order_status 레코드를 삭제한다."""
+    try:
+        from supabase_client import get_supabase_client
+        sb = get_supabase_client()
+        if not sb:
+            return
+        cutoff = (dt.date.today() - dt.timedelta(days=14)).strftime("%Y-%m-%d")
+        uids = get_auth_user_ids()
+        if not uids:
+            return
+        for uid in uids:
+            res = (
+                sb.table("order_status")
+                .delete()
+                .eq("auth_user_id", uid)
+                .lt("order_date", cutoff)
+                .execute()
+            )
+            deleted = len(res.data) if res.data else 0
+            if deleted:
+                logging.info(f"[order-status] 오래된 레코드 {deleted}건 삭제 (uid={uid[:8]})")
+    except Exception as e:
+        logging.warning(f"[order-status] 정리 실패: {e}")
 
 
 def main():
