@@ -119,12 +119,32 @@ def ensure_active_desktop(max_retries=5, wait_after=5):
             continue
 
         try:
+            # tscon을 직접 실행 시도
             result = subprocess.run(
                 ["tscon", str(session_id), "/dest:console"],
                 capture_output=True, text=True, timeout=10
             )
             if result.returncode != 0:
-                logging.error(f"tscon 실패 (code {result.returncode}): {result.stderr.strip()}")
+                stderr = result.stderr.strip()
+                logging.warning(f"tscon 직접 실행 실패 (code {result.returncode}): {stderr}")
+                # 권한 부족(7045) 시 SYSTEM 권한으로 재시도 (schtasks 이용)
+                if "7045" in stderr or "거부" in stderr or "denied" in stderr.lower():
+                    logging.info("SYSTEM 권한으로 tscon 재시도...")
+                    task_cmd = f'tscon {session_id} /dest:console'
+                    subprocess.run(
+                        ["schtasks", "/create", "/tn", "_TsconRestore", "/tr", task_cmd,
+                         "/sc", "once", "/st", "00:00", "/ru", "SYSTEM", "/f"],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    subprocess.run(
+                        ["schtasks", "/run", "/tn", "_TsconRestore"],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    time.sleep(2)
+                    subprocess.run(
+                        ["schtasks", "/delete", "/tn", "_TsconRestore", "/f"],
+                        capture_output=True, text=True, timeout=5
+                    )
             else:
                 logging.info(f"tscon 성공. {wait_after}초 대기 중...")
             time.sleep(wait_after)

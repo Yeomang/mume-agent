@@ -110,7 +110,11 @@ def run_aftermarket_job(is_test_mode: bool = False, manual: bool = False):
             continue
 
         set_log_context(job="aftermarket", user=user)
-        hts_login(exe_path, user)
+        login_ok = hts_login(exe_path, user)
+        if not login_ok:
+            logging.error(f"[{user}] HTS 로그인 실패 — 해당 사용자의 모든 작업을 건너뜁니다.")
+            kill_window_by_title(hts_window_name)
+            continue
 
         for item in account_items:
             account_index = item["account"]
