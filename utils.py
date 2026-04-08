@@ -59,15 +59,24 @@ def install_log_context_filter():
 # ─────────────────────────────────────
 
 def _is_desktop_active():
-    """활성 데스크톱이 존재하는지 Win32 API로 확인."""
+    """활성 데스크톱이 존재하고 실제로 GUI 조작 가능한지 확인."""
     if not _IS_WINDOWS:
         return True
     try:
+        # 1차: OpenInputDesktop API 확인
         hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x0100)
-        if hdesk:
-            ctypes.windll.user32.CloseDesktop(hdesk)
-            return True
-        return False
+        if not hdesk:
+            return False
+        ctypes.windll.user32.CloseDesktop(hdesk)
+
+        # 2차: 실제 커서 위치를 읽을 수 있는지 확인 (더 엄격한 검증)
+        import ctypes.wintypes
+        point = ctypes.wintypes.POINT()
+        if not ctypes.windll.user32.GetCursorPos(ctypes.byref(point)):
+            logging.debug("GetCursorPos 실패 — 데스크톱이 비활성 상태")
+            return False
+
+        return True
     except Exception:
         return False
 
@@ -86,10 +95,12 @@ def _get_current_session_id():
         return None
 
 
-def ensure_active_desktop(max_retries=3, wait_after=3):
+def ensure_active_desktop(max_retries=5, wait_after=5):
     """
     GUI 조작 전에 호출. 활성 데스크톱이 없으면 tscon으로 세션을 콘솔에 재연결.
     RDP 끊긴 상태에서도 pywinauto가 정상 작동하도록 보장.
+
+    복원 실패 시 텔레그램 알림을 전송한다.
     """
     if not _IS_WINDOWS:
         return True
@@ -104,7 +115,7 @@ def ensure_active_desktop(max_retries=3, wait_after=3):
         session_id = _get_current_session_id()
         if session_id is None:
             logging.error("현재 세션 ID를 가져올 수 없습니다.")
-            time.sleep(2)
+            time.sleep(3)
             continue
 
         try:
@@ -119,11 +130,25 @@ def ensure_active_desktop(max_retries=3, wait_after=3):
             time.sleep(wait_after)
         except Exception as e:
             logging.error(f"tscon 실행 오류: {e}")
-            time.sleep(2)
+            time.sleep(3)
 
     if _is_desktop_active():
         return True
+
     logging.error("활성 데스크톱 복원 실패. GUI 자동화가 작동하지 않을 수 있습니다.")
+    # 텔레그램 알림 전송
+    try:
+        from config import Config
+        token = Config.TELEGRAM_BOT_TOKEN_ORDER
+        chat_id = Config.TELEGRAM_CHAT_ID
+        if token and chat_id:
+            send_telegram_message(token, chat_id,
+                "⚠️ *에이전트 데스크톱 세션 복원 실패*\n\n"
+                "RDP 세션이 끊어져 GUI 자동화를 실행할 수 없습니다.\n"
+                "Windows 서버에 RDP로 접속하여 세션을 복원해주세요."
+            )
+    except Exception:
+        pass
     return False
 
 
