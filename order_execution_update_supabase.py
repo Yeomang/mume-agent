@@ -219,10 +219,44 @@ def orders_execution_update_supabase(
             for _, order in filtered_df.iterrows()
         ])
 
+        # 기존 자동수집 거래 건수 (텔레그램 2차 알림 분기용 — INSERT 전에 미리 조회)
+        _prev_trade_count_for_telegram = 0
+        _trade_date_for_check = None
+        if not filtered_df.empty and not pd.isnull(filtered_df.iloc[0]['주문일자']):
+            _trade_date_for_check = pd.to_datetime(filtered_df.iloc[0]['주문일자']).strftime('%Y-%m-%d')
+        if _trade_date_for_check and not is_test_mode:
+            try:
+                _sb = get_supabase_client()
+                if _sb:
+                    _prev_res = _sb.table("cycle_trades").select("id", count="exact").eq("cycle_id", cycle_id).eq("trade_date", _trade_date_for_check).eq("event_type", "TRADE").execute()
+                    _prev_trade_count_for_telegram = _prev_res.count if _prev_res.count is not None else len(_prev_res.data or [])
+            except Exception:
+                pass
+
         # 해외주식 보유잔고 CSV 로 텔레그램 메시지 구성
         file_path = f'./data/stock_balance_processed/stock_balance_processed_{selected_user}_{account_index}.csv'
         df_balance = load_csv_if_exists(file_path)
-        if df_balance is not None and not df_balance.empty:
+
+        # 1차 실행 (기존 거래 없음): 전체 내역 전송 / 2차 실행 (기존 거래 있음): 추가분만 전송
+        is_rerun = _prev_trade_count_for_telegram > 0
+        executed_count = len(filtered_df[filtered_df['체결수량'] != 0])
+        added_count = executed_count - _prev_trade_count_for_telegram
+
+        if is_rerun and added_count <= 0:
+            # 2차 실행인데 추가 체결 없음
+            send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+                f"💵 *[무매사이클 #{cycle_seq}]* 추가 체결 없음\n▶ 계좌: {selected_user} | {account_index}번째 | {ticker}")
+        elif is_rerun and added_count > 0:
+            # 2차 실행, 추가 체결 있음
+            message = (
+                f"💵 *[무매사이클 #{cycle_seq}] 추가 체결 {added_count}건*\n\n"
+                f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
+                f"▶ 종목: *{ticker} ({method_ver})*\n"
+                f"▶ 실제 HTS 체결내역\n"
+                f"{formatted_orders}"
+            )
+            send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message)
+        elif df_balance is not None and not df_balance.empty:
             filtered = df_balance[df_balance['종목코드'] == ticker]
             if not filtered.empty:
                 balance_from_hts = str(filtered['보유수량'].iloc[0])
@@ -272,9 +306,27 @@ def orders_execution_update_supabase(
         else:
             logging.info("주문내역 중 해당 사이클 종목의 체결내역이 없습니다.")
 
-        # Supabase cycle_trades에 INSERT + order_status 동기화
+        # Supabase cycle_trades에 삭제 후 재입력 + order_status 동기화
         if not is_test_mode:
+            # 기존 자동수집 거래(TRADE) 건수 조회 (텔레그램 알림 분기용)
+            prev_trade_count = 0
+            if trade_date:
+                try:
+                    prev_res = sb.table("cycle_trades").select("id", count="exact").eq("cycle_id", cycle_id).eq("trade_date", trade_date).eq("event_type", "TRADE").execute()
+                    prev_trade_count = prev_res.count if prev_res.count is not None else len(prev_res.data or [])
+                except Exception:
+                    pass
+
+            # 기존 자동수집 거래 삭제 (MANUAL은 보존)
+            if trade_date and prev_trade_count > 0:
+                try:
+                    sb.table("cycle_trades").delete().eq("cycle_id", cycle_id).eq("trade_date", trade_date).eq("event_type", "TRADE").execute()
+                    logging.info(f"기존 자동수집 거래 {prev_trade_count}건 삭제 (cycle_id={cycle_id}, date={trade_date})")
+                except Exception as e:
+                    logging.error(f"기존 거래 삭제 실패: {e}")
+
             # 체결 건 INSERT
+            new_trade_count = 0
             if not only_executed_df.empty:
                 rows_to_insert = []
                 for _, row in only_executed_df.iterrows():
@@ -291,7 +343,8 @@ def orders_execution_update_supabase(
 
                 try:
                     sb.table("cycle_trades").insert(rows_to_insert).execute()
-                    logging.info(f"{len(rows_to_insert)}건의 체결내역을 cycle_trades에 INSERT 완료!")
+                    new_trade_count = len(rows_to_insert)
+                    logging.info(f"{new_trade_count}건의 체결내역을 cycle_trades에 INSERT 완료!")
                 except Exception as e:
                     logging.error(f"cycle_trades INSERT 실패: {e}")
 
