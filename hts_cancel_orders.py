@@ -1,6 +1,6 @@
 # C:\mume_meritz\hts_cancel_orders.py
 
-from utils import setup_window, find_control_by_criteria, set_focus_and_type, wait_for_window, block_input, _handle_password_dialog
+from utils import setup_window, find_control_by_criteria, set_focus_and_type, wait_for_window, block_input, _handle_password_dialog, with_desktop_retry
 from secrets_manager import get_account_password
 from config import Config
 from pywinauto import Application
@@ -27,6 +27,7 @@ AUTO_ID_CANCEL_ORDER_BUTTON = "3840"  # 취소 확인 모달 - 취소주문 버�
 AUTO_ID_CANCEL_CLOSE_BUTTON = "3845"  # 취소 확인 모달 - 닫기 버튼 automation_id
 
 
+@with_desktop_retry
 def hts_cancel_orders(selected_user, account_index, is_test_mode):
     """
     해외주식 미체결 주문 일괄 취소 실행

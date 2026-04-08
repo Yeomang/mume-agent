@@ -1,4 +1,4 @@
-from utils import setup_window, get_window_handle, find_control_by_criteria, set_focus_and_type, wait_for_window, block_input, copy_to_clipboard
+from utils import setup_window, get_window_handle, find_control_by_criteria, set_focus_and_type, wait_for_window, block_input, copy_to_clipboard, with_desktop_retry
 from config import Config
 from pywinauto import Application
 import time
@@ -20,6 +20,7 @@ AUTO_ID_TABLE_BALANCE = "3860"  # 해외주식 보유잔고 화면에서 표 영
 # main_window.print_control_identifiers()
 
 
+@with_desktop_retry
 def save_data_stock_balance(selected_user, account_index):
     logging.info(">>>>> HTS 해외주식 보유잔고 데이터 csv파일로 저장하기 시작! <<<<<")
 

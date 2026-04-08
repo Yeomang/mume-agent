@@ -1,4 +1,4 @@
-from utils import setup_window, get_window_handle, find_control_by_criteria, set_focus_and_type, wait_for_window, block_input, copy_to_clipboard
+from utils import setup_window, get_window_handle, find_control_by_criteria, set_focus_and_type, wait_for_window, block_input, copy_to_clipboard, with_desktop_retry
 from config import Config
 from pywinauto import Application
 import time
@@ -22,6 +22,7 @@ AUTO_ID_INQUIRY_BUTTON = "3895"  # 해외주식 주문체결내역 조회 버튼
 AUTO_ID_TABLE_INQUIRY = "3910"  # 해외주식 주문체결내역 화면에서 아래 표 영역 automation_id
 
 
+@with_desktop_retry
 def save_data_order_execution(selected_user, account_index, inquiry_start_date=None, inquiry_end_date=None):
     logging.info(">>>>> HTS 주문체결내역 데이터 csv파일로 저장하기 시작! <<<<<")
     # 조회기간 매개변수를 별도로 지정하지 않은 경우, default로 어제 날짜로 지정

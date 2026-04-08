@@ -1,4 +1,4 @@
-from utils import setup_window, find_control_by_criteria, set_focus_and_type, wait_for_window, block_input, _handle_password_dialog
+from utils import setup_window, find_control_by_criteria, set_focus_and_type, wait_for_window, block_input, _handle_password_dialog, with_desktop_retry
 from secrets_manager import get_account_password
 from config import Config
 from pywinauto import Application
@@ -25,6 +25,7 @@ AUTO_ID_SELL_BUTTON = "3880"  # 매도주문확인팝업에서 '매도' 버튼 a
 # main_window.print_control_identifiers()
 
 
+@with_desktop_retry
 def hts_order_sell(selected_user, account_index, ticker, sell_orders, is_test_mode):
     order_window = None
     try:

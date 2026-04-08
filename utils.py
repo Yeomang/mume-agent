@@ -126,6 +126,38 @@ def ensure_active_desktop(max_retries=3, wait_after=3):
     logging.error("활성 데스크톱 복원 실패. GUI 자동화가 작동하지 않을 수 있습니다.")
     return False
 
+
+def with_desktop_retry(func):
+    """
+    GUI 조작 함수에 데스크톱 복원 재시도를 추가하는 데코레이터.
+
+    "no active desktop" RuntimeError 발생 시:
+    1. ensure_active_desktop()으로 데스크톱 복원
+    2. 함수 전체를 처음부터 재시도 (최대 1회)
+
+    사용법:
+        @with_desktop_retry
+        def hts_order_buy(selected_user, account_index, ...):
+            ...
+    """
+    import functools
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except RuntimeError as e:
+            if "no active desktop" in str(e).lower():
+                logging.warning(f"[{func.__name__}] 데스크톱 세션 끊김 감지. 복원 후 재시도합니다.")
+                if ensure_active_desktop():
+                    logging.info(f"[{func.__name__}] 데스크톱 복원 성공. 재시도...")
+                    return func(*args, **kwargs)
+                else:
+                    logging.error(f"[{func.__name__}] 데스크톱 복원 실패.")
+            raise
+    return wrapper
+
+
 if _IS_WINDOWS:
     from pywinauto.findwindows import ElementNotFoundError
     from pywinauto.keyboard import send_keys
