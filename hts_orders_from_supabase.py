@@ -27,7 +27,7 @@ def _get_active_cycles(sb, selected_user, account_index, auth_user_ids=None, cyc
     uids = auth_user_ids or get_auth_user_ids()
     res = supabase_fetch_all(
         lambda s, e: sb.table("cycle_master")
-        .select("id, cycle_seq, status, method, stock_code, principal, split_count, target_rate, dip_buy_rate, max_drop_rate")
+        .select("id, cycle_seq, status, method, stock_code, principal, split_count, target_rate, dip_buy_rate, max_drop_rate, prev_close_price")
         .in_("status", ["진행중", "시작전"])
         .in_("auth_user_id", uids)
         .eq("user_name", selected_user)
@@ -242,6 +242,21 @@ def hts_orders_from_supabase(
             logging.info("해외주식 보유잔고 CSV 파일이 없으므로 DB에 기록된 최신 보유수와 일치여부 확인 불가")
 
         # 주문 리스트 추출
+        # computed가 비어있으면 (시작전 사이클) 첫 매수 주문 직접 계산
+        if not computed or not computed.get("avg_loc_buy_qty"):
+            prev_close = cycle.get("prev_close_price")
+            principal = float(cycle.get("principal") or 0)
+            split_count = int(cycle.get("split_count") or 1)
+            if prev_close and float(prev_close) > 0 and principal > 0 and split_count >= 1:
+                pc = float(prev_close)
+                per_buy = principal / split_count
+                avg_loc_buy_price = round(pc * 1.1, 2)
+                avg_loc_buy_qty = int(per_buy / avg_loc_buy_price) if avg_loc_buy_price > 0 else 0
+                if avg_loc_buy_qty > 0:
+                    computed["avg_loc_buy_qty"] = avg_loc_buy_qty
+                    computed["avg_loc_buy_price"] = avg_loc_buy_price
+                    logging.info(f"시작전 사이클 첫 매수: LOC {avg_loc_buy_qty}주 @ ${avg_loc_buy_price}")
+
         version_map = {
             "V2.2": _extract_order_list_v22,
             "V3.0": _extract_order_list_v30,
