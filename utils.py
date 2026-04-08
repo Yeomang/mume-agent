@@ -145,7 +145,7 @@ def ensure_active_desktop(max_retries=5, wait_after=5):
             send_telegram_message(token, chat_id,
                 "⚠️ *에이전트 데스크톱 세션 복원 실패*\n\n"
                 "RDP 세션이 끊어져 GUI 자동화를 실행할 수 없습니다.\n"
-                "Windows 서버에 RDP로 접속하여 세션을 복원해주세요."
+                "콘솔 → Meritz 자동화 → 수동 실행 요청에서 *중지* 버튼을 눌러주세요."
             )
     except Exception:
         pass
