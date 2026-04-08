@@ -136,67 +136,88 @@ def hts_login(
         f"category='{cert_keyword_category}', window_keyword='{window_keyword}'"
     )
 
-    # RDP 끊김 대비: 활성 데스크톱 확보 (GUI 자동화에 필수)
-    if not ensure_active_desktop():
-        logging.error("활성 데스크톱을 확보할 수 없어 로그인을 중단합니다.")
-        return False
-
-    # 마우스 및 키보드 잠금 시작
-    block_input(True)
-    logging.info("입력 잠금 활성화")
-
-    try:
-        # 공동인증서 비밀번호 가져오기 (keyring / 자격 증명 관리자)
-        password = get_cert_password(selected_user)
-        logging.info("공동인증서 비밀번호 로드 완료 (keyring).")
-
-        # HTS 프로그램 실행
-        launch_program(exe_path)
-
-        # '인증서 선택' 창 찾기
-        window = find_window_and_connect(window_keyword)
-        if not window:
-            logging.error(f"로그인 중단: 창 탐색 실패. keyword='{window_keyword}'")
+    max_login_retries = 2
+    for login_attempt in range(max_login_retries):
+        # RDP 끊김 대비: 활성 데스크톱 확보 (GUI 자동화에 필수)
+        if not ensure_active_desktop():
+            logging.error("활성 데스크톱을 확보할 수 없어 로그인을 중단합니다.")
             return False
 
-        # 인증서 목록에서 조건에 맞는 항목 선택
-        if not select_certificate(window, cert_keyword_category, selected_user):
-            logging.error(f"로그인 중단: 인증서 선택 실패. category='{cert_keyword_category}', user='{selected_user}'")
+        # 마우스 및 키보드 잠금 시작
+        block_input(True)
+        logging.info("입력 잠금 활성화")
+
+        try:
+            # 공동인증서 비밀번호 가져오기 (keyring / 자격 증명 관리자)
+            password = get_cert_password(selected_user)
+            logging.info("공동인증서 비밀번호 로드 완료 (keyring).")
+
+            # HTS 프로그램 실행
+            launch_program(exe_path)
+
+            # '인증서 선택' 창 찾기
+            window = find_window_and_connect(window_keyword)
+            if not window:
+                logging.error(f"로그인 중단: 창 탐색 실패. keyword='{window_keyword}'")
+                return False
+
+            # 인증서 목록에서 조건에 맞는 항목 선택
+            if not select_certificate(window, cert_keyword_category, selected_user):
+                logging.error(f"로그인 중단: 인증서 선택 실패. category='{cert_keyword_category}', user='{selected_user}'")
+                return False
+
+            # 암호 입력
+            if not input_password(window, password):
+                logging.error("로그인 중단: 비밀번호 입력 실패.")
+                return False
+
+            # 확인 버튼 클릭
+            if not click_confirm_button(window):
+                logging.error("로그인 중단: 확인 버튼 클릭 실패.")
+                return False
+
+            # HTS 창 핸들 가져오기
+            hwnd = get_window_handle("iMeritz")
+            if not hwnd:
+                logging.error("로그인 중단: 'iMeritz' 창 핸들을 찾지 못했습니다.")
+                return False
+
+            # HTS 창 메인모니터로 이동, 포커싱, 최대화, 항상위로
+            setup_window(hwnd)
+            time.sleep(3)
+
+            # Esc 키를 10번 누르기
+            send_keys('{ESC 10}')
+            elapsed = time.time() - start_ts
+            logging.info(f"HTS 로그인 완료 (총 소요: {elapsed:.2f}s)")
+            return True
+
+        except RuntimeError as e:
+            err_msg = str(e).lower()
+            if "no active desktop" in err_msg and login_attempt < max_login_retries - 1:
+                logging.warning(f"데스크톱 세션 끊김 감지. 복원 후 재시도합니다. ({login_attempt+1}/{max_login_retries})")
+                block_input(False)
+                # HTS 프로세스 정리 후 재시도
+                try:
+                    from utils import kill_window_by_title
+                    kill_window_by_title("iMeritz")
+                except Exception:
+                    pass
+                time.sleep(3)
+                continue
+            logging.exception(f"HTS 로그인 중 예외 발생: {e}")
             return False
 
-        # 암호 입력
-        if not input_password(window, password):
-            logging.error("로그인 중단: 비밀번호 입력 실패.")
+        except Exception as e:
+            logging.exception(f"HTS 로그인 중 예외 발생: {e}")
             return False
 
-        # 확인 버튼 클릭
-        if not click_confirm_button(window):
-            logging.error("로그인 중단: 확인 버튼 클릭 실패.")
-            return False
+        finally:
+            block_input(False)
+            logging.info("입력 잠금 해제")
 
-        # HTS 창 핸들 가져오기
-        hwnd = get_window_handle("iMeritz")
-        if not hwnd:
-            logging.error("로그인 중단: 'iMeritz' 창 핸들을 찾지 못했습니다.")
-            return False
-
-        # HTS 창 메인모니터로 이동, 포커싱, 최대화, 항상위로
-        setup_window(hwnd)
-        time.sleep(3)
-
-        # Esc 키를 10번 누르기
-        send_keys('{ESC 10}')
-        elapsed = time.time() - start_ts
-        logging.info(f"HTS 로그인 완료 (총 소요: {elapsed:.2f}s)")
-        return True
-
-    except Exception as e:
-        logging.exception(f"HTS 로그인 중 예외 발생: {e}")
-        return False
-
-    finally:
-        block_input(False)
-        logging.info("입력 잠금 해제")
+    logging.error("HTS 로그인 최대 재시도 횟수 초과")
+    return False
 
 if __name__ == "__main__":
     # 웹UI에서 저장한 자동 실행 대상에서 첫 번째 사용자 로드 (테스트용)
