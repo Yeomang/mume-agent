@@ -59,24 +59,15 @@ def install_log_context_filter():
 # ─────────────────────────────────────
 
 def _is_desktop_active():
-    """활성 데스크톱이 존재하고 실제로 GUI 조작 가능한지 확인."""
+    """활성 데스크톱이 존재하는지 Win32 API로 확인."""
     if not _IS_WINDOWS:
         return True
     try:
-        # 1차: OpenInputDesktop API 확인
         hdesk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x0100)
-        if not hdesk:
-            return False
-        ctypes.windll.user32.CloseDesktop(hdesk)
-
-        # 2차: 실제 커서 위치를 읽을 수 있는지 확인 (더 엄격한 검증)
-        import ctypes.wintypes
-        point = ctypes.wintypes.POINT()
-        if not ctypes.windll.user32.GetCursorPos(ctypes.byref(point)):
-            logging.debug("GetCursorPos 실패 — 데스크톱이 비활성 상태")
-            return False
-
-        return True
+        if hdesk:
+            ctypes.windll.user32.CloseDesktop(hdesk)
+            return True
+        return False
     except Exception:
         return False
 

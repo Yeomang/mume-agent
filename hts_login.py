@@ -138,11 +138,6 @@ def hts_login(
 
     max_login_retries = 2
     for login_attempt in range(max_login_retries):
-        # RDP 끊김 대비: 활성 데스크톱 확보 (GUI 자동화에 필수)
-        if not ensure_active_desktop():
-            logging.error("활성 데스크톱을 확보할 수 없어 로그인을 중단합니다.")
-            return False
-
         # 마우스 및 키보드 잠금 시작
         block_input(True)
         logging.info("입력 잠금 활성화")
@@ -197,12 +192,16 @@ def hts_login(
             if "no active desktop" in err_msg and login_attempt < max_login_retries - 1:
                 logging.warning(f"데스크톱 세션 끊김 감지. 복원 후 재시도합니다. ({login_attempt+1}/{max_login_retries})")
                 block_input(False)
-                # HTS 프로세스 정리 후 재시도
+                # HTS 프로세스 정리
                 try:
                     from utils import kill_window_by_title
                     kill_window_by_title("iMeritz")
                 except Exception:
                     pass
+                # 데스크톱 복원 시도
+                if not ensure_active_desktop():
+                    logging.error("데스크톱 복원 실패. 로그인을 중단합니다.")
+                    return False
                 time.sleep(3)
                 continue
             logging.exception(f"HTS 로그인 중 예외 발생: {e}")
