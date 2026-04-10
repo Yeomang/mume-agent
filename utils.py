@@ -1,6 +1,7 @@
 import json
 import time
 import logging
+from logging.handlers import RotatingFileHandler
 import ctypes
 import os
 import subprocess
@@ -221,7 +222,12 @@ def setup_logging(log_file: str = "log.log", level: int = logging.INFO) -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(log_file, encoding="utf-8")
+            RotatingFileHandler(
+                log_file,
+                maxBytes=5 * 1024 * 1024,  # 5MB
+                backupCount=5,             # log.log.1 ~ log.log.5
+                encoding="utf-8",
+            ),
         ]
     )
     _logging_initialized = True
