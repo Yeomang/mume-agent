@@ -138,6 +138,57 @@ def _extract_order_list_v30(computed):
     return sell_orders, buy_orders
 
 
+def _extract_order_list_v40(computed):
+    """V4.0 주문 리스트 추출 (computed JSON 기반)
+
+    V4.0 은 일반 모드와 리버스 모드 두 가지가 있다.
+    리버스 모드 여부는 computed["v4_mode"] 필드로 판별.
+
+    일반 모드: V3.0 과 동일한 필드 구조 (star_loc_sell, limit_sell, avg_loc_buy,
+              star_loc_buy, dip_buy, extra_loc_buy 사용)
+    리버스 모드: star_loc_sell (MOC 또는 LOC) + star_loc_buy 만 사용.
+              avg_loc_buy / dip_buy / extra_loc_buy 는 비활성.
+    """
+    v4_mode = computed.get("v4_mode", "normal")
+    star_loc_sell_price = computed.get("star_loc_sell_price")
+    if star_loc_sell_price == "MOC매도":
+        order_type_index_loc_sell = 5  # MOC
+    else:
+        order_type_index_loc_sell = 3  # LOC
+
+    if v4_mode == "reverse":
+        logging.info("[V4.0 리버스 모드]")
+        sell_orders = [
+            {"quantity": computed.get("star_loc_sell_qty"), "price": star_loc_sell_price, "order_type_index": order_type_index_loc_sell},
+        ]
+        buy_orders = [
+            {"quantity": computed.get("star_loc_buy_qty"), "price": computed.get("star_loc_buy_price")},
+        ]
+    else:
+        # 일반 모드 (V3.0 과 동일한 구조)
+        sell_orders = [
+            {"quantity": computed.get("limit_sell_qty"), "price": computed.get("limit_sell_price"), "order_type_index": 0},
+            {"quantity": computed.get("star_loc_sell_qty"), "price": star_loc_sell_price, "order_type_index": order_type_index_loc_sell},
+        ]
+        buy_orders = [
+            {"quantity": computed.get("avg_loc_buy_qty"), "price": computed.get("avg_loc_buy_price")},
+            {"quantity": computed.get("star_loc_buy_qty"), "price": computed.get("star_loc_buy_price")},
+            {"quantity": computed.get("dip_buy_qty"), "price": computed.get("dip_buy_price")},
+        ]
+
+        # 하락대비 추가 LOC 매수
+        extra_qty = computed.get("extra_loc_buy_qty", 0) or 0
+        extra_prices = computed.get("extra_loc_buy_prices", []) or []
+        if extra_qty and extra_prices:
+            for i in range(min(int(extra_qty), len(extra_prices))):
+                if extra_prices[i]:
+                    buy_orders.append({"quantity": 1, "price": extra_prices[i]})
+
+    logging.info(f"매도 주문 리스트 : {sell_orders}")
+    logging.info(f"매수 주문 리스트 : {buy_orders}")
+    return sell_orders, buy_orders
+
+
 def hts_orders_from_supabase(
     selected_user,
     account_index,
@@ -260,6 +311,7 @@ def hts_orders_from_supabase(
         version_map = {
             "V2.2": _extract_order_list_v22,
             "V3.0": _extract_order_list_v30,
+            "V4.0": _extract_order_list_v40,
         }
 
         if method_ver not in version_map:
