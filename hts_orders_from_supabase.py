@@ -242,8 +242,8 @@ def hts_orders_from_supabase(
             logging.info("해외주식 보유잔고 CSV 파일이 없으므로 DB에 기록된 최신 보유수와 일치여부 확인 불가")
 
         # 주문 리스트 추출
-        # computed가 비어있으면 (시작전 사이클) 첫 매수 주문 직접 계산
-        if not computed or not computed.get("avg_loc_buy_qty"):
+        # 시작전 사이클이고 computed가 비어있으면 첫 매수 주문 직접 계산
+        if cycle.get("status") == "시작전" and (not computed or not computed.get("avg_loc_buy_qty")):
             prev_close = cycle.get("prev_close_price")
             principal = float(cycle.get("principal") or 0)
             split_count = int(cycle.get("split_count") or 1)
