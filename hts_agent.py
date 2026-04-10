@@ -385,7 +385,7 @@ def get_logs(max_lines: int = 300):
     if not LOG_FILE.exists():
         return {"text": "(로그 파일 없음)"}
     try:
-        max_bytes = 200_000
+        max_bytes = max(200_000, max_lines * 200)
         with LOG_FILE.open("rb") as f:
             f.seek(0, os.SEEK_END)
             size = f.tell()
@@ -417,7 +417,7 @@ def monitor(job: str, max_lines: int = 300):
     log_text = "(로그 파일 없음)"
     if LOG_FILE.exists():
         try:
-            max_bytes = 200_000
+            max_bytes = max(200_000, max_lines * 200)
             with LOG_FILE.open("rb") as f:
                 f.seek(0, os.SEEK_END)
                 size = f.tell()
