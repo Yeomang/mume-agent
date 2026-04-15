@@ -84,7 +84,8 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 
 @app.middleware("http")
 async def verify_agent_key(request: Request, call_next):
-    if AGENT_KEY and request.headers.get("X-Agent-Key") != AGENT_KEY:
+    # /health는 인증 없이 접근 허용 (연결 테스트, 모니터링용)
+    if AGENT_KEY and request.url.path != "/health" and request.headers.get("X-Agent-Key") != AGENT_KEY:
         return JSONResponse(status_code=401, content={"detail": "Invalid agent key"})
     return await call_next(request)
 
