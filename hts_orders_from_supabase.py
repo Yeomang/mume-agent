@@ -6,6 +6,7 @@ from utils import (
     send_telegram_message,
     is_trading_day_today,
     is_after_regular_session,
+    is_aftermarket_open,
     load_csv_if_exists,
 )
 from hts_order_buy import hts_order_buy
@@ -392,6 +393,15 @@ def hts_orders_from_supabase(
         order_type_index = 3  # LOC (기본)
 
         if aftermarket_mode:
+            if not is_aftermarket_open():
+                logging.warning("═══ 애프터마켓 시간 초과 (ET 19:50 이후): 주문 불가. 이 사이클을 건너뜁니다. ═══")
+                send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+                    f"⚠️ *[무매사이클 #{cycle_seq}] 주문 불가*\n\n"
+                    f"▶ 종목: {ticker} ({method_ver})\n"
+                    f"▶ 사유: 애프터마켓 시간(ET 16:00~19:50) 초과\n"
+                    f"▶ 다음 거래일 evening job에서 자동 실행됩니다."
+                )
+                continue
             logging.info("═══ 애프터마켓 모드: 정규장 마감 후 실행. LOC/MOC → 지정가 전환 ═══")
             sell_orders, buy_orders, order_type_index = _convert_orders_for_aftermarket(
                 sell_orders, buy_orders, ticker

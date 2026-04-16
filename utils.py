@@ -554,6 +554,22 @@ def is_after_regular_session():
     return et_now.hour >= 16
 
 
+def is_aftermarket_open():
+    """미국 동부시간(ET) 기준 애프터마켓(16:00~19:50) 시간인지 확인.
+
+    메리츠증권 기준: After Market 05:00~08:50 KST (서머타임) = 16:00~19:50 ET
+    """
+    et_now = _now_et()
+    hour, minute = et_now.hour, et_now.minute
+    if hour < 16:
+        return False  # 정규장 이전
+    if hour > 19:
+        return False  # 애프터마켓 종료
+    if hour == 19 and minute > 50:
+        return False  # 19:50 이후
+    return True
+
+
 def is_trading_day_today():
     """미국 동부시간(ET) 기준 오늘이 NYSE 거래일인지 확인."""
     nyse = mcal.get_calendar("NYSE")
