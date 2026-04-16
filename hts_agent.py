@@ -351,7 +351,16 @@ def stop_job(job: str):
                 except Exception:
                     pass
 
-        # 3) HTS 프로세스 종료 (/T: 자식 프로세스 트리 포함)
+        # 3) HTS 프로세스 종료 — 여러 방법 시도
+        # 3a) 윈도우 핸들 기반 종료 (kill_window_by_title)
+        hts_window_name = Config.HTS_WINDOW_NAME or "iMeritz"
+        try:
+            from utils import kill_window_by_title
+            kill_window_by_title(hts_window_name)
+        except Exception as e:
+            write_log("KILL_WINDOW_FAIL", job, f"{hts_window_name}: {e}")
+
+        # 3b) taskkill /F /T /IM (프로세스 이름 기반)
         for name in HTS_PROCESS_NAMES:
             r = subprocess.run(
                 ["taskkill", "/F", "/T", "/IM", name],
@@ -363,6 +372,38 @@ def stop_job(job: str):
                 output = (r.stdout + r.stderr).strip()
                 if "not found" not in output.lower() and "찾을 수 없습니다" not in output:
                     write_log("TASKKILL_FAIL", job, f"{name}: {output}")
+
+        # 3c) 권한 부족 시 SYSTEM 권한으로 재시도 (schtasks 이용)
+        # taskkill이 "액세스가 거부되었습니다"로 실패한 경우
+        for name in HTS_PROCESS_NAMES:
+            try:
+                # 프로세스가 아직 살아있는지 확인
+                check = subprocess.run(
+                    ["tasklist", "/FI", f"IMAGENAME eq {name}"],
+                    capture_output=True, text=True, check=False, timeout=5,
+                )
+                if name.lower() not in check.stdout.lower():
+                    continue
+                # SYSTEM 권한으로 taskkill 실행
+                task_cmd = f'taskkill /F /T /IM {name}'
+                subprocess.run(
+                    ["schtasks", "/create", "/tn", "_KillHTS", "/tr", task_cmd,
+                     "/sc", "once", "/st", "00:00", "/ru", "SYSTEM", "/f"],
+                    capture_output=True, text=True, check=False, timeout=5,
+                )
+                subprocess.run(
+                    ["schtasks", "/run", "/tn", "_KillHTS"],
+                    capture_output=True, text=True, check=False, timeout=5,
+                )
+                import time
+                time.sleep(2)
+                subprocess.run(
+                    ["schtasks", "/delete", "/tn", "_KillHTS", "/f"],
+                    capture_output=True, text=True, check=False, timeout=5,
+                )
+                write_log("TASKKILL_SYSTEM", job, f"{name} killed via SYSTEM schtasks")
+            except Exception as e:
+                write_log("TASKKILL_SYSTEM_FAIL", job, f"{name}: {e}")
 
         # 4) 입력 잠금 해제
         try:
