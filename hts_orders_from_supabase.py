@@ -5,6 +5,7 @@ Supabase에서 주문 데이터를 읽어 HTS 매도/매수 주문을 실행하�
 from utils import (
     send_telegram_message,
     is_trading_day_today,
+    is_after_regular_session,
     load_csv_if_exists,
 )
 from hts_order_buy import hts_order_buy
@@ -14,11 +15,62 @@ from supabase_client import get_supabase_client, supabase_fetch_all
 import logging
 import traceback
 import httpx
+import yfinance as yf
 from hts_orders_history_save_to_csv import save_orders_history
 from order_history_data_preprocessing import order_history_data_preprocessing
 
 TELEGRAM_BOT_TOKEN = Config.TELEGRAM_BOT_TOKEN_ORDER
 TELEGRAM_CHAT_ID = Config.TELEGRAM_CHAT_ID
+
+
+def _get_aftermarket_price(ticker: str) -> float | None:
+    """yfinance로 현재 애프터마켓/정규장 가격 조회."""
+    try:
+        t = yf.Ticker(ticker)
+        info = t.fast_info if hasattr(t, "fast_info") else t.info
+        price = getattr(info, "last_price", None) or info.get("regularMarketPrice")
+        return float(price) if price else None
+    except Exception as e:
+        logging.warning(f"[aftermarket] {ticker} 현재가 조회 실패: {e}")
+        return None
+
+
+def _convert_orders_for_aftermarket(sell_orders, buy_orders, ticker):
+    """장 마감 후: LOC/MOC 주문을 지정가로 변환.
+
+    - LOC매도(3) → 지정가매도(0), 같은 가격 유지
+    - MOC매도(5) → 지정가매도(0), 현재가 × 0.97
+    - LOC매수(3) → 지정가매수(0), 현재가 × 1.03
+    - 지정가매도(0) → 변경 없음
+    """
+    current_price = _get_aftermarket_price(ticker)
+    if current_price is None:
+        logging.warning(f"[aftermarket] {ticker} 현재가를 조회할 수 없어 LOC/MOC 주문을 변환할 수 없습니다.")
+        return sell_orders, buy_orders, 0  # 변환 실패 → 원본 그대로 (HTS에서 거부될 수 있음)
+
+    logging.info(f"[aftermarket] {ticker} 현재가: ${current_price:.2f}")
+
+    new_sell_orders = []
+    for o in sell_orders:
+        oti = o.get("order_type_index", 0)
+        if oti == 5:  # MOC → 지정가, 현재가 × 0.97
+            new_price = round(current_price * 0.97, 2)
+            logging.info(f"[aftermarket] MOC매도 → 지정가매도 @ ${new_price:.2f} (현재가×0.97)")
+            new_sell_orders.append({**o, "order_type_index": 0, "price": new_price})
+        elif oti == 3:  # LOC → 지정가, 같은 가격
+            logging.info(f"[aftermarket] LOC매도 → 지정가매도 @ ${o['price']}")
+            new_sell_orders.append({**o, "order_type_index": 0})
+        else:
+            new_sell_orders.append(o)
+
+    new_buy_orders = []
+    buy_price_override = round(current_price * 1.03, 2)
+    for o in buy_orders:
+        new_buy_orders.append({**o, "price": buy_price_override})
+    if new_buy_orders:
+        logging.info(f"[aftermarket] 매수 가격 → 지정가 ${buy_price_override:.2f} (현재가×1.03)")
+
+    return new_sell_orders, new_buy_orders, 0  # order_type_index for buy = 0 (지정가)
 
 
 def _get_active_cycles(sb, selected_user, account_index, auth_user_ids=None, cycles=None):
@@ -329,28 +381,64 @@ def hts_orders_from_supabase(
             if str(order["quantity"]).strip() not in invalid_values
             and str(order["price"]).strip() not in invalid_values
         ]
+        buy_orders = [
+            order for order in buy_orders
+            if str(order["quantity"]).strip() not in invalid_values
+            and str(order["price"]).strip() not in invalid_values
+        ]
+
+        # 장 마감 후 실행 시: LOC/MOC → 지정가 전환 (애프터마켓 모드)
+        aftermarket_mode = is_after_regular_session()
+        order_type_index = 3  # LOC (기본)
+
+        if aftermarket_mode:
+            logging.info("═══ 애프터마켓 모드: 정규장 마감 후 실행. LOC/MOC → 지정가 전환 ═══")
+            sell_orders, buy_orders, order_type_index = _convert_orders_for_aftermarket(
+                sell_orders, buy_orders, ticker
+            )
+
+        # 중복 주문 방지: order_status에 당일 주문 기록이 있으면 스킵
+        if not is_test_mode:
+            try:
+                from zoneinfo import ZoneInfo
+                from datetime import datetime as _dt
+                today_et = _dt.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+                console_url = Config.CONSOLE_URL.rstrip("/") if Config.CONSOLE_URL else ""
+                agent_key = Config.HTS_AGENT_KEY
+                if console_url:
+                    headers = {"X-Agent-Key": agent_key} if agent_key else {}
+                    check_res = httpx.get(
+                        f"{console_url}/api/order-status/check",
+                        params={"cycle_id": cycle_id, "order_date": today_et},
+                        headers=headers,
+                        timeout=5.0,
+                    )
+                    if check_res.status_code == 200:
+                        check_data = check_res.json()
+                        if check_data.get("has_orders"):
+                            logging.info(f"[중복방지] 사이클 #{cycle_seq}의 당일({today_et}) 주문이 이미 존재합니다. 스킵합니다.")
+                            continue
+            except Exception as e:
+                logging.warning(f"[중복방지] order_status 확인 실패 (무시하고 진행): {e}")
+
         if sell_orders:
             sell_success, sell_err = hts_order_sell(selected_user, account_index, ticker, sell_orders, is_test_mode)
             if sell_success and not is_test_mode:
+                order_type_label = "limit_sell" if aftermarket_mode else None
                 _record_order_status(cycle_id, [
-                    {"order_type": o.get("order_type_index", 0) == 0 and "limit_sell" or "loc_sell",
+                    {"order_type": order_type_label or (o.get("order_type_index", 0) == 0 and "limit_sell" or "loc_sell"),
                      "side": "sell", "qty": int(o["quantity"]), "price": float(o["price"])}
                     for o in sell_orders
                 ])
         else:
             logging.info(">>>>> 매도할 데이터가 없으므로 주문을 SKIP합니다. <<<<<")
 
-        order_type_index = 3  # LOC
-        buy_orders = [
-            order for order in buy_orders
-            if str(order["quantity"]).strip() not in invalid_values
-            and str(order["price"]).strip() not in invalid_values
-        ]
         if buy_orders:
             buy_success, buy_err = hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_index, is_test_mode)
             if buy_success and not is_test_mode:
+                buy_type = "limit_buy" if aftermarket_mode else "loc_buy"
                 _record_order_status(cycle_id, [
-                    {"order_type": "loc_buy", "side": "buy",
+                    {"order_type": buy_type, "side": "buy",
                      "qty": int(o["quantity"]), "price": float(o["price"])}
                     for o in buy_orders if o.get("quantity") and o.get("price")
                 ])

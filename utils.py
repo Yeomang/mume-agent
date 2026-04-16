@@ -545,6 +545,15 @@ def _now_et():
     return datetime.now(ZoneInfo("America/New_York"))
 
 
+def is_after_regular_session():
+    """미국 동부시간(ET) 기준 정규장(16:00) 마감 이후인지 확인.
+
+    True이면 LOC/MOC 주문 불가 → 지정가로 전환 필요.
+    """
+    et_now = _now_et()
+    return et_now.hour >= 16
+
+
 def is_trading_day_today():
     """미국 동부시간(ET) 기준 오늘이 NYSE 거래일인지 확인."""
     nyse = mcal.get_calendar("NYSE")
