@@ -451,8 +451,26 @@ def stop_all_jobs():
             LAST_STATUS[job]["finished_at"] = dt.datetime.now().isoformat(timespec="seconds")
             LAST_STATUS[job]["returncode"] = None
 
-        # 2) HTS 한 번만 종료
+        # 2) HTS 종료 — 먼저 WM_CLOSE로 정상 종료 시도
         hts_kill_failed = False
+        try:
+            import win32gui, win32con
+            def _close_hts_windows(hwnd, _):
+                try:
+                    if win32gui.IsWindowVisible(hwnd):
+                        title = win32gui.GetWindowText(hwnd)
+                        if "iMeritz" in title or "imeritz" in title.lower():
+                            win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+                            write_log("WM_CLOSE", "all", f"WM_CLOSE 전송: {title} (hwnd={hwnd})")
+                except Exception:
+                    pass
+            win32gui.EnumWindows(_close_hts_windows, None)
+            import time
+            time.sleep(3)  # 정상 종료 대기
+        except Exception as e:
+            write_log("WM_CLOSE_FAIL", "all", f"WM_CLOSE 실패: {e}")
+
+        # 남아있는 프로세스 강제 종료
         for name in HTS_PROCESS_NAMES:
             check = subprocess.run(
                 ["tasklist", "/FI", f"IMAGENAME eq {name}"],
