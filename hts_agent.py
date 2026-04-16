@@ -393,6 +393,15 @@ def stop_job(job: str):
                 write_log("TASKKILL_SYSTEM", job, f"{name} killed via SYSTEM")
             except Exception as e:
                 write_log("TASKKILL_SYSTEM_FAIL", job, f"{name}: {e}")
+            # PowerShell 최종 시도
+            try:
+                subprocess.run(
+                    ["powershell", "-Command",
+                     f"Get-Process -Name '{name.replace('.exe','')}' -ErrorAction SilentlyContinue | Stop-Process -Force"],
+                    capture_output=True, text=True, check=False, timeout=10,
+                )
+            except Exception:
+                pass
 
         # 4) 입력 잠금 해제
         try:
@@ -477,11 +486,26 @@ def stop_all_jobs():
                     ["tasklist", "/FI", f"IMAGENAME eq {name}"],
                     capture_output=True, text=True, check=False, timeout=5,
                 )
-                if name.lower() in recheck.stdout.lower():
-                    hts_kill_failed = True
-                    write_log("TASKKILL_SYSTEM_FAIL", "all", f"{name} 여전히 실행 중 (권한 부족)")
-                else:
+                if name.lower() not in recheck.stdout.lower():
                     write_log("TASKKILL_SYSTEM", "all", f"{name} killed via SYSTEM")
+                    continue
+                # SYSTEM schtasks도 실패 → PowerShell 시도
+                write_log("TASKKILL_PS", "all", f"{name} PowerShell로 종료 시도")
+                ps = subprocess.run(
+                    ["powershell", "-Command",
+                     f"Get-Process -Name '{name.replace('.exe','')}' -ErrorAction SilentlyContinue | Stop-Process -Force"],
+                    capture_output=True, text=True, check=False, timeout=10,
+                )
+                time.sleep(1)
+                recheck2 = subprocess.run(
+                    ["tasklist", "/FI", f"IMAGENAME eq {name}"],
+                    capture_output=True, text=True, check=False, timeout=5,
+                )
+                if name.lower() not in recheck2.stdout.lower():
+                    write_log("TASKKILL_PS", "all", f"{name} killed via PowerShell")
+                else:
+                    hts_kill_failed = True
+                    write_log("TASKKILL_ALL_FAIL", "all", f"{name} 모든 방법 실패")
             except Exception as e:
                 hts_kill_failed = True
                 write_log("TASKKILL_SYSTEM_FAIL", "all", f"{name}: {e}")
