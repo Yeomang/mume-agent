@@ -42,6 +42,9 @@ class Config:
     # 콘솔 API URL (recompute 트리거용)
     CONSOLE_URL = os.getenv("CONSOLE_URL", "")
 
+    # 이 에이전트가 담당하는 계정의 auth_user_id (설정 시 해당 계정만 처리)
+    AGENT_AUTH_USER_ID = os.getenv("AGENT_AUTH_USER_ID", "")
+
     @classmethod
     def validate(cls) -> bool:
         """필수 설정값이 모두 있는지 검증"""

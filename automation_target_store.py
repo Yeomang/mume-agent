@@ -37,17 +37,23 @@ def _load_from_supabase() -> Dict[str, List[int]] | None:
     global _cached_auth_user_ids, _cached_user_auth_map
     try:
         from supabase_client import get_supabase_client
+        from config import Config
 
         sb = get_supabase_client()
         if sb is None:
             return None
 
-        res = (
+        query = (
             sb.table("user_accounts")
             .select("auth_user_id,user_name,account_index")
             .eq("is_automation_target", True)
-            .execute()
         )
+        # AGENT_AUTH_USER_ID가 설정되어 있으면 해당 계정만 조회
+        if Config.AGENT_AUTH_USER_ID:
+            query = query.eq("auth_user_id", Config.AGENT_AUTH_USER_ID)
+            logging.info(f"[automation_target] auth_user_id 필터 적용: {Config.AGENT_AUTH_USER_ID[:8]}...")
+
+        res = query.execute()
         rows = res.data or []
         if not rows:
             return None
