@@ -351,40 +351,30 @@ def stop_job(job: str):
                 except Exception:
                     pass
 
-        # 3) HTS 프로세스 종료 — 여러 방법 시도
-        # 3a) 윈도우 핸들 기반 종료 (kill_window_by_title)
-        hts_window_name = Config.HTS_WINDOW_NAME or "iMeritz"
-        try:
-            from utils import kill_window_by_title
-            kill_window_by_title(hts_window_name)
-        except Exception as e:
-            write_log("KILL_WINDOW_FAIL", job, f"{hts_window_name}: {e}")
-
-        # 3b) taskkill /F /T /IM (프로세스 이름 기반)
+        # 3) HTS 프로세스 종료 — taskkill → SYSTEM 폴백
         for name in HTS_PROCESS_NAMES:
+            # 프로세스 존재 여부 먼저 확인
+            check = subprocess.run(
+                ["tasklist", "/FI", f"IMAGENAME eq {name}"],
+                capture_output=True, text=True, check=False, timeout=5,
+            )
+            if name.lower() not in check.stdout.lower():
+                continue
+
+            # 일반 taskkill 시도
             r = subprocess.run(
                 ["taskkill", "/F", "/T", "/IM", name],
                 capture_output=True, text=True, check=False,
             )
             if r.returncode == 0:
-                write_log("TASKKILL", job, f"{name} killed (with tree)")
-            else:
-                output = (r.stdout + r.stderr).strip()
-                if "not found" not in output.lower() and "찾을 수 없습니다" not in output:
-                    write_log("TASKKILL_FAIL", job, f"{name}: {output}")
+                write_log("TASKKILL", job, f"{name} killed")
+                continue
 
-        # 3c) 권한 부족 시 SYSTEM 권한으로 재시도 (schtasks 이용)
-        # taskkill이 "액세스가 거부되었습니다"로 실패한 경우
-        for name in HTS_PROCESS_NAMES:
+            # 권한 부족 시 SYSTEM 권한으로 재시도
+            output = (r.stdout + r.stderr).strip()
+            write_log("TASKKILL_RETRY", job, f"{name} 일반 종료 실패, SYSTEM 권한 시도: {output}")
             try:
-                # 프로세스가 아직 살아있는지 확인
-                check = subprocess.run(
-                    ["tasklist", "/FI", f"IMAGENAME eq {name}"],
-                    capture_output=True, text=True, check=False, timeout=5,
-                )
-                if name.lower() not in check.stdout.lower():
-                    continue
-                # SYSTEM 권한으로 taskkill 실행
+                import time
                 task_cmd = f'taskkill /F /T /IM {name}'
                 subprocess.run(
                     ["schtasks", "/create", "/tn", "_KillHTS", "/tr", task_cmd,
@@ -395,13 +385,12 @@ def stop_job(job: str):
                     ["schtasks", "/run", "/tn", "_KillHTS"],
                     capture_output=True, text=True, check=False, timeout=5,
                 )
-                import time
                 time.sleep(2)
                 subprocess.run(
                     ["schtasks", "/delete", "/tn", "_KillHTS", "/f"],
                     capture_output=True, text=True, check=False, timeout=5,
                 )
-                write_log("TASKKILL_SYSTEM", job, f"{name} killed via SYSTEM schtasks")
+                write_log("TASKKILL_SYSTEM", job, f"{name} killed via SYSTEM")
             except Exception as e:
                 write_log("TASKKILL_SYSTEM_FAIL", job, f"{name}: {e}")
 
