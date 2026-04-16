@@ -443,6 +443,7 @@ def stop_all_jobs():
             LAST_STATUS[job]["returncode"] = None
 
         # 2) HTS 한 번만 종료
+        hts_kill_failed = False
         for name in HTS_PROCESS_NAMES:
             check = subprocess.run(
                 ["tasklist", "/FI", f"IMAGENAME eq {name}"],
@@ -471,8 +472,18 @@ def stop_all_jobs():
                 time.sleep(2)
                 subprocess.run(["schtasks", "/delete", "/tn", "_KillHTS", "/f"],
                                capture_output=True, text=True, check=False, timeout=5)
-                write_log("TASKKILL_SYSTEM", "all", f"{name} killed via SYSTEM")
+                # 종료 확인
+                recheck = subprocess.run(
+                    ["tasklist", "/FI", f"IMAGENAME eq {name}"],
+                    capture_output=True, text=True, check=False, timeout=5,
+                )
+                if name.lower() in recheck.stdout.lower():
+                    hts_kill_failed = True
+                    write_log("TASKKILL_SYSTEM_FAIL", "all", f"{name} 여전히 실행 중 (권한 부족)")
+                else:
+                    write_log("TASKKILL_SYSTEM", "all", f"{name} killed via SYSTEM")
             except Exception as e:
+                hts_kill_failed = True
                 write_log("TASKKILL_SYSTEM_FAIL", "all", f"{name}: {e}")
 
         # 3) 입력 잠금 해제
@@ -483,6 +494,8 @@ def stop_all_jobs():
 
         write_log("STOP_ALL_DONE", "all", "모든 작업 중지 완료")
 
+    if hts_kill_failed:
+        return {"message": "작업은 중지했으나 HTS 종료에 실패했습니다. hts_agent.bat를 관리자 권한으로 실행하면 해결됩니다."}
     return {"message": "모든 작업을 중지하고 HTS를 종료했습니다."}
 
 
