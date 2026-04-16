@@ -363,7 +363,7 @@ def stop_job(job: str):
 
             # 일반 taskkill 시도
             r = subprocess.run(
-                ["taskkill", "/F", "/T", "/IM", name],
+                ["taskkill", "/F", "/IM", name],
                 capture_output=True, text=True, check=False,
             )
             if r.returncode == 0:
@@ -375,7 +375,7 @@ def stop_job(job: str):
             write_log("TASKKILL_RETRY", job, f"{name} 일반 종료 실패, SYSTEM 권한 시도: {output}")
             try:
                 import time
-                task_cmd = f'taskkill /F /T /IM {name}'
+                task_cmd = f'taskkill /F /IM {name}'
                 subprocess.run(
                     ["schtasks", "/create", "/tn", "_KillHTS", "/tr", task_cmd,
                      "/sc", "once", "/st", "00:00", "/ru", "SYSTEM", "/f"],
@@ -462,7 +462,7 @@ def stop_all_jobs():
                 continue
 
             r = subprocess.run(
-                ["taskkill", "/F", "/T", "/IM", name],
+                ["taskkill", "/F", "/IM", name],
                 capture_output=True, text=True, check=False,
             )
             if r.returncode == 0:
@@ -472,7 +472,7 @@ def stop_all_jobs():
             # SYSTEM 폴백
             try:
                 import time
-                task_cmd = f'taskkill /F /T /IM {name}'
+                task_cmd = f'taskkill /F /IM {name}'
                 subprocess.run(["schtasks", "/create", "/tn", "_KillHTS", "/tr", task_cmd,
                                "/sc", "once", "/st", "00:00", "/ru", "SYSTEM", "/f"],
                                capture_output=True, text=True, check=False, timeout=5)
