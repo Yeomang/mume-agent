@@ -451,24 +451,28 @@ def stop_all_jobs():
             LAST_STATUS[job]["finished_at"] = dt.datetime.now().isoformat(timespec="seconds")
             LAST_STATUS[job]["returncode"] = None
 
-        # 2) HTS 종료 — 먼저 WM_CLOSE로 정상 종료 시도
+        # 2) HTS 종료 — 윈도우 핸들 → PID → WMIC 종료 (원래 방식, 대기 없음)
         hts_kill_failed = False
         try:
-            import win32gui, win32con
-            def _close_hts_windows(hwnd, _):
+            import win32gui, win32process as _w32proc
+            killed_pids = set()
+            def _find_and_kill_hts(hwnd, _):
                 try:
-                    if win32gui.IsWindowVisible(hwnd):
-                        title = win32gui.GetWindowText(hwnd)
-                        if "iMeritz" in title or "imeritz" in title.lower():
-                            win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
-                            write_log("WM_CLOSE", "all", f"WM_CLOSE 전송: {title} (hwnd={hwnd})")
+                    title = win32gui.GetWindowText(hwnd)
+                    if "iMeritz" in title or "imeritz" in title.lower():
+                        _, pid = _w32proc.GetWindowThreadProcessId(hwnd)
+                        if pid and pid not in killed_pids:
+                            killed_pids.add(pid)
+                            write_log("WMIC_KILL", "all", f"PID {pid} 종료 시도 (WMIC): {title}")
+                            os.system(f'wmic process where ProcessId={pid} delete')
                 except Exception:
                     pass
-            win32gui.EnumWindows(_close_hts_windows, None)
-            import time
-            time.sleep(3)  # 정상 종료 대기
+            win32gui.EnumWindows(_find_and_kill_hts, None)
+            if killed_pids:
+                import time
+                time.sleep(2)
         except Exception as e:
-            write_log("WM_CLOSE_FAIL", "all", f"WM_CLOSE 실패: {e}")
+            write_log("WMIC_KILL_FAIL", "all", f"윈도우 기반 종료 실패: {e}")
 
         # 남아있는 프로세스 강제 종료
         for name in HTS_PROCESS_NAMES:
