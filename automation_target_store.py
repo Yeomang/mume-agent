@@ -43,15 +43,32 @@ def _load_from_supabase() -> Dict[str, List[int]] | None:
         if sb is None:
             return None
 
+        # 이 에이전트가 담당하는 계정 자동 판별
+        owner_uid = Config.AGENT_AUTH_USER_ID  # .env 직접 설정 (우선)
+        if not owner_uid and Config.HTS_AGENT_KEY:
+            # agent_secret으로 agent_settings 역조회하여 auth_user_id 자동 감지
+            try:
+                agent_res = (
+                    sb.table("agent_settings")
+                    .select("auth_user_id")
+                    .eq("agent_secret", Config.HTS_AGENT_KEY)
+                    .limit(1)
+                    .execute()
+                )
+                if agent_res.data:
+                    owner_uid = agent_res.data[0].get("auth_user_id", "")
+                    logging.info(f"[automation_target] agent_secret으로 계정 자동 감지: {owner_uid[:8]}...")
+            except Exception as e:
+                logging.warning(f"[automation_target] agent_settings 역조회 실패: {e}")
+
         query = (
             sb.table("user_accounts")
             .select("auth_user_id,user_name,account_index")
             .eq("is_automation_target", True)
         )
-        # AGENT_AUTH_USER_ID가 설정되어 있으면 해당 계정만 조회
-        if Config.AGENT_AUTH_USER_ID:
-            query = query.eq("auth_user_id", Config.AGENT_AUTH_USER_ID)
-            logging.info(f"[automation_target] auth_user_id 필터 적용: {Config.AGENT_AUTH_USER_ID[:8]}...")
+        if owner_uid:
+            query = query.eq("auth_user_id", owner_uid)
+            logging.info(f"[automation_target] auth_user_id 필터 적용: {owner_uid[:8]}...")
 
         res = query.execute()
         rows = res.data or []
