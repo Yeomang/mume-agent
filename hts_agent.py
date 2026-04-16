@@ -716,3 +716,34 @@ def deploy_status():
         return data
     except Exception:
         return {"deployed_at": None, "message": "배포 정보를 읽을 수 없습니다."}
+
+
+# ─────────────────────────────────────
+# 시작 시 자동 업데이트
+# ─────────────────────────────────────
+
+def _auto_update_on_startup():
+    """에이전트 시작 시 콘솔에서 최신 코드를 다운로드하여 자동 업데이트."""
+    console_url = Config.CONSOLE_URL.rstrip("/") if Config.CONSOLE_URL else ""
+    if not console_url:
+        return
+
+    release_url = f"{console_url}/api/deploy/agent-zip"
+    write_log("AUTO_UPDATE", "deploy", f"시작 시 자동 업데이트 확인: {release_url}")
+
+    try:
+        result = _execute_deploy(release_url)
+        updated = result.get("updated_files", [])
+        if updated:
+            write_log("AUTO_UPDATE", "deploy", f"업데이트 적용: {', '.join(updated)}")
+            # hts_agent.py 변경 시 재시작 (bat 래퍼가 자동 재실행)
+            if result.get("restart_scheduled"):
+                write_log("AUTO_UPDATE", "deploy", "hts_agent.py 변경 감지 — 재시작 예정")
+        else:
+            write_log("AUTO_UPDATE", "deploy", "이미 최신 버전입니다.")
+    except Exception as e:
+        write_log("AUTO_UPDATE_ERROR", "deploy", f"자동 업데이트 실패 (무시하고 진행): {e}")
+
+
+# 앱 시작 시 자동 업데이트 실행
+_auto_update_on_startup()
