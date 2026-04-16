@@ -351,14 +351,18 @@ def stop_job(job: str):
                 except Exception:
                     pass
 
-        # 3) HTS 프로세스 종료
+        # 3) HTS 프로세스 종료 (/T: 자식 프로세스 트리 포함)
         for name in HTS_PROCESS_NAMES:
             r = subprocess.run(
-                ["taskkill", "/F", "/IM", name],
+                ["taskkill", "/F", "/T", "/IM", name],
                 capture_output=True, text=True, check=False,
             )
             if r.returncode == 0:
-                write_log("TASKKILL", job, f"{name} killed")
+                write_log("TASKKILL", job, f"{name} killed (with tree)")
+            else:
+                output = (r.stdout + r.stderr).strip()
+                if "not found" not in output.lower() and "찾을 수 없습니다" not in output:
+                    write_log("TASKKILL_FAIL", job, f"{name}: {output}")
 
         # 4) 입력 잠금 해제
         try:
