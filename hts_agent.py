@@ -408,6 +408,84 @@ def stop_job(job: str):
     return {"message": f"{JOB_LABEL.get(job, job)} 작업을 중지했습니다."}
 
 
+@app.post("/stop-all")
+def stop_all_jobs():
+    """모든 작업을 중지하고 HTS를 한 번만 종료."""
+    write_log("STOP_ALL_REQUEST", "all", "requested via API")
+
+    with PROC_LOCK:
+        # 1) 모든 job의 프로세스 종료
+        for job in JOB_CONFIG:
+            proc = CURRENT_PROC[job]
+            if proc is not None:
+                try:
+                    proc.terminate()
+                    write_log("STOP_TRY", job, f"pid={proc.pid}")
+                except Exception:
+                    pass
+                CURRENT_PROC[job] = None
+
+            # job_control PID 종료
+            try:
+                pids = read_job_pids(job)
+            except Exception:
+                pids = []
+            for pid in pids:
+                try:
+                    subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                                   capture_output=True, text=True, check=False)
+                    unregister_job_pid(job, pid)
+                except Exception:
+                    pass
+
+            LAST_STATUS[job]["status"] = "stopped"
+            LAST_STATUS[job]["finished_at"] = dt.datetime.now().isoformat(timespec="seconds")
+            LAST_STATUS[job]["returncode"] = None
+
+        # 2) HTS 한 번만 종료
+        for name in HTS_PROCESS_NAMES:
+            check = subprocess.run(
+                ["tasklist", "/FI", f"IMAGENAME eq {name}"],
+                capture_output=True, text=True, check=False, timeout=5,
+            )
+            if name.lower() not in check.stdout.lower():
+                continue
+
+            r = subprocess.run(
+                ["taskkill", "/F", "/T", "/IM", name],
+                capture_output=True, text=True, check=False,
+            )
+            if r.returncode == 0:
+                write_log("TASKKILL", "all", f"{name} killed")
+                continue
+
+            # SYSTEM 폴백
+            try:
+                import time
+                task_cmd = f'taskkill /F /T /IM {name}'
+                subprocess.run(["schtasks", "/create", "/tn", "_KillHTS", "/tr", task_cmd,
+                               "/sc", "once", "/st", "00:00", "/ru", "SYSTEM", "/f"],
+                               capture_output=True, text=True, check=False, timeout=5)
+                subprocess.run(["schtasks", "/run", "/tn", "_KillHTS"],
+                               capture_output=True, text=True, check=False, timeout=5)
+                time.sleep(2)
+                subprocess.run(["schtasks", "/delete", "/tn", "_KillHTS", "/f"],
+                               capture_output=True, text=True, check=False, timeout=5)
+                write_log("TASKKILL_SYSTEM", "all", f"{name} killed via SYSTEM")
+            except Exception as e:
+                write_log("TASKKILL_SYSTEM_FAIL", "all", f"{name}: {e}")
+
+        # 3) 입력 잠금 해제
+        try:
+            block_input(False)
+        except Exception:
+            pass
+
+        write_log("STOP_ALL_DONE", "all", "모든 작업 중지 완료")
+
+    return {"message": "모든 작업을 중지하고 HTS를 종료했습니다."}
+
+
 @app.get("/status")
 def get_status(job: str):
     _ensure_valid_job(job)
