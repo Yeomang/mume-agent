@@ -351,15 +351,27 @@ def hts_orders_from_supabase(
             prev_close = cycle.get("prev_close_price")
             principal = float(cycle.get("principal") or 0)
             split_count = int(cycle.get("split_count") or 1)
+            max_drop_rate = float(cycle.get("max_drop_rate") or -30)
             if prev_close and float(prev_close) > 0 and principal > 0 and split_count >= 1:
                 pc = float(prev_close)
                 per_buy = principal / split_count
                 avg_loc_buy_price = round(pc * 1.1, 2)
                 avg_loc_buy_qty = int(per_buy / avg_loc_buy_price) if avg_loc_buy_price > 0 else 0
+                # 폭락대비 추가 LOC 매수
+                max_drop_price = round(pc * (1 + max_drop_rate / 100), 2)
+                extra_loc_buy_qty = max(0, int(per_buy // max_drop_price) - avg_loc_buy_qty) if max_drop_price > 0 else 0
+                extra_loc_buy_prices = []
+                for n in range(1, extra_loc_buy_qty + 1):
+                    total = avg_loc_buy_qty + n
+                    if total > 0 and per_buy > 0:
+                        extra_loc_buy_prices.append(round(per_buy / total, 2))
                 if avg_loc_buy_qty > 0:
                     computed["avg_loc_buy_qty"] = avg_loc_buy_qty
                     computed["avg_loc_buy_price"] = avg_loc_buy_price
-                    logging.info(f"시작전 사이클 첫 매수: LOC {avg_loc_buy_qty}주 @ ${avg_loc_buy_price}")
+                    computed["max_drop_price"] = max_drop_price
+                    computed["extra_loc_buy_qty"] = extra_loc_buy_qty
+                    computed["extra_loc_buy_prices"] = extra_loc_buy_prices
+                    logging.info(f"시작전 사이클 첫 매수: LOC {avg_loc_buy_qty}주 @ ${avg_loc_buy_price}, 추가LOC {extra_loc_buy_qty}주")
 
         version_map = {
             "V2.2": _extract_order_list_v22,
