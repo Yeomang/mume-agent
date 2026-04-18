@@ -324,13 +324,19 @@ def always_on_top(hwnd):
 
 
 def setup_window(hwnd):
-    """윈도우 제어를 위한 셋업 함수들 통합 실행"""
+    """윈도우 제어를 위한 셋업 함수들 통합 실행.
+
+    - focus_window: 다른 앱에 가려져 있어도 HTS 창을 앞으로 가져옴.
+    - maximize_window: 이미 최대화 상태면 skip.
+    - always_on_top: 자동화 도중 다른 알림/팝업이 덮어버리는 것을 방지.
+      (좌표 기반 click_input/우클릭 동작 안정성 확보를 위해 필수)
+    """
     # move_window_to_main_monitor(hwnd)
-    # focus_window(hwnd)
+    focus_window(hwnd)
     time.sleep(1)
     maximize_window(hwnd)
-    # time.sleep(1)
-    # always_on_top(hwnd)
+    time.sleep(1)
+    always_on_top(hwnd)
     
     
 def block_input(state=True):

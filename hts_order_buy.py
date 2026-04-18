@@ -179,35 +179,25 @@ def hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_i
         block_input(False)
 
 if __name__ == "__main__":
-    # 웹UI에서 저장한 자동 실행 대상에서 첫 번째 사용자/계좌 로드 (테스트용)
-    from automation_target_store import load_automation_target_with_meta
-    
-    targets, _ = load_automation_target_with_meta(None, include_cycles=True)
-    # 모든 job에서 첫 번째 사용자 찾기
-    users = {}
-    for job_targets in targets.values() if isinstance(targets, dict) else []:
-        if isinstance(job_targets, dict):
-            users.update(job_targets)
-            break
-    
-    selected_user = list(users.keys())[0] if users else ""
-    account_index = 1
-    if selected_user and users.get(selected_user):
-        # 첫 번째 계좌 사용
-        first_account = users[selected_user][0] if isinstance(users[selected_user], list) else None
-        if isinstance(first_account, dict):
-            account_index = first_account.get("account", 1)
-        elif isinstance(first_account, int):
-            account_index = first_account
-    
-    if not selected_user:
-        print("경고: 저장된 사용자/계좌 설정이 없습니다. 웹UI에서 먼저 설정해주세요.")
-    
-    ticker = "TQQQ"
-    buy_orders = [
+    # ------------------------------------------------------------
+    # 로컬 테스트용 실행 블록
+    # - TEST_USER / TEST_ACCOUNT 를 직접 지정 가능. None 이면 Supabase 자동 로드.
+    # - IS_TEST_MODE=True 면 주문 확인 팝업까지만 진행하고 실제 체결하지 않음.
+    # - 주문 파라미터(ticker, buy_orders, order_type_index) 는 아래에서 직접 수정.
+    #   order_type_index → 0: 보통(지정가), 3: LOC(장마감지정가)
+    # ------------------------------------------------------------
+    TEST_USER: str | None = None
+    TEST_ACCOUNT: int | None = None
+    IS_TEST_MODE = True
+
+    TICKER = "TQQQ"
+    BUY_ORDERS = [
         {"quantity": 3, "price": 65.49},
-        {"quantity": 7, "price": 44.49}
+        {"quantity": 7, "price": 44.49},
     ]
-    order_type_index = 3  # 3: LOC(장마감지정가)
-    is_test_mode = True  # 테스트 모드 여부 설정
-    hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_index, is_test_mode)
+    ORDER_TYPE_INDEX = 3
+
+    from automation_target_store import resolve_first_user_account
+
+    selected_user, account_index = resolve_first_user_account(TEST_USER, TEST_ACCOUNT)
+    hts_order_buy(selected_user, account_index, TICKER, BUY_ORDERS, ORDER_TYPE_INDEX, IS_TEST_MODE)

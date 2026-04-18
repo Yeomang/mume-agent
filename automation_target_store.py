@@ -153,3 +153,49 @@ def load_automation_target_with_meta(
     if targets:
         return targets, None
     return {}, None
+
+
+def resolve_first_user_account(
+    override_user: str | None = None,
+    override_account: int | None = None,
+    default_account: int = 1,
+) -> Tuple[str, int]:
+    """
+    각 모듈의 `__main__` 테스트 블록에서 사용자/계좌를 결정하기 위한 헬퍼.
+
+    동작:
+    - `override_user` / `override_account` 가 주어지면 해당 값을 우선 사용.
+    - 지정되지 않은 값은 Supabase `automation_target` 에서 첫 번째 사용자와
+      해당 사용자의 첫 번째 계좌(account_index)로 자동 보정.
+    - 저장된 대상이 없고 override도 없으면 `RuntimeError` 를 발생시켜
+      웹UI 설정이 누락됐음을 즉시 알림.
+
+    Returns:
+        (selected_user, account_index) 튜플.
+    """
+    user = override_user
+    account = override_account
+
+    if user is None or account is None:
+        targets = _load_from_supabase() or {}
+
+        if user is None:
+            if not targets:
+                raise RuntimeError(
+                    "저장된 사용자/계좌 설정이 없습니다. "
+                    "웹UI에서 먼저 자동 실행 대상을 설정하거나, "
+                    "override_user/override_account 인자를 직접 지정해주세요."
+                )
+            user = next(iter(targets.keys()))
+
+        if account is None:
+            accounts = targets.get(user, []) or []
+            first = accounts[0] if accounts else None
+            if isinstance(first, dict):
+                account = int(first.get("account", default_account))
+            elif isinstance(first, int):
+                account = first
+            else:
+                account = default_account
+
+    return user, int(account)

@@ -219,20 +219,13 @@ def hts_login(
     return False
 
 if __name__ == "__main__":
-    # 웹UI에서 저장한 자동 실행 대상에서 첫 번째 사용자 로드 (테스트용)
-    from automation_target_store import load_automation_target_with_meta
-    
-    exe_path = Config.HTS_EXE_PATH
-    targets, _ = load_automation_target_with_meta(None, include_cycles=True)
-    # 모든 job에서 첫 번째 사용자 찾기
-    users = {}
-    for job_targets in targets.values() if isinstance(targets, dict) else []:
-        if isinstance(job_targets, dict):
-            users.update(job_targets)
-            break
-    
-    selected_user = list(users.keys())[0] if users else ""
-    if not selected_user:
-        print("경고: 저장된 사용자/계좌 설정이 없습니다. 웹UI에서 먼저 설정해주세요.")
-    else:
-        hts_login(exe_path, selected_user)
+    # ------------------------------------------------------------
+    # 로컬 테스트용 실행 블록
+    # - TEST_USER 를 직접 지정 가능. None 이면 Supabase 자동 로드한 첫 번째 사용자로 로그인.
+    # ------------------------------------------------------------
+    TEST_USER: str | None = None
+
+    from automation_target_store import resolve_first_user_account
+
+    selected_user, _ = resolve_first_user_account(TEST_USER, override_account=1)
+    hts_login(Config.HTS_EXE_PATH, selected_user)

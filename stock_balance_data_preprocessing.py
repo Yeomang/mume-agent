@@ -88,28 +88,15 @@ def stock_balance_data_preprocessing(selected_user, account_index):
     return
     
 if __name__ == "__main__":
-    # 웹UI에서 저장한 자동 실행 대상에서 첫 번째 사용자/계좌 로드 (테스트용)
-    from automation_target_store import load_automation_target_with_meta
-    
-    targets, _ = load_automation_target_with_meta(None, include_cycles=True)
-    # 모든 job에서 첫 번째 사용자 찾기
-    users = {}
-    for job_targets in targets.values() if isinstance(targets, dict) else []:
-        if isinstance(job_targets, dict):
-            users.update(job_targets)
-            break
-    
-    selected_user = list(users.keys())[0] if users else ""
-    account_index = 1
-    if selected_user and users.get(selected_user):
-        # 첫 번째 계좌 사용
-        first_account = users[selected_user][0] if isinstance(users[selected_user], list) else None
-        if isinstance(first_account, dict):
-            account_index = first_account.get("account", 1)
-        elif isinstance(first_account, int):
-            account_index = first_account
-    
-    if not selected_user:
-        print("경고: 저장된 사용자/계좌 설정이 없습니다. 웹UI에서 먼저 설정해주세요.")
-    else:
-        stock_balance_data_preprocessing(selected_user, account_index)
+    # ------------------------------------------------------------
+    # 로컬 테스트용 실행 블록
+    # - TEST_USER / TEST_ACCOUNT 를 직접 지정 가능. None 이면 Supabase 자동 로드.
+    # - 사전 조건: data/stock_balance_raw/ 폴더에 해당 사용자/계좌의 raw CSV가 있어야 함.
+    # ------------------------------------------------------------
+    TEST_USER: str | None = None
+    TEST_ACCOUNT: int | None = None
+
+    from automation_target_store import resolve_first_user_account
+
+    selected_user, account_index = resolve_first_user_account(TEST_USER, TEST_ACCOUNT)
+    stock_balance_data_preprocessing(selected_user, account_index)

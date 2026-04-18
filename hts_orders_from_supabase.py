@@ -499,29 +499,20 @@ def hts_orders_from_supabase(
 
 
 if __name__ == "__main__":
+    # ------------------------------------------------------------
+    # 로컬 테스트용 실행 블록
+    # - TEST_USER / TEST_ACCOUNT 를 직접 지정 가능. None 이면 Supabase 자동 로드.
+    # - IS_TEST_MODE=True 면 주문 확인 팝업까지만 진행 (실제 주문하지 않음).
+    # ------------------------------------------------------------
+    TEST_USER: str | None = None
+    TEST_ACCOUNT: int | None = None
+    IS_TEST_MODE = True
+
     try:
-        from automation_target_store import load_automation_target_with_meta
+        from automation_target_store import resolve_first_user_account
 
-        targets, _ = load_automation_target_with_meta(None, include_cycles=True)
-        users = {}
-        for job_targets in targets.values() if isinstance(targets, dict) else []:
-            if isinstance(job_targets, dict):
-                users.update(job_targets)
-                break
-
-        selected_user = list(users.keys())[0] if users else ""
-        account_index = 1
-        if selected_user and users.get(selected_user):
-            first_account = users[selected_user][0] if isinstance(users[selected_user], list) else None
-            if isinstance(first_account, dict):
-                account_index = first_account.get("account", 1)
-            elif isinstance(first_account, int):
-                account_index = first_account
-
-        if not selected_user:
-            print("경고: 저장된 사용자/계좌 설정이 없습니다. 웹UI에서 먼저 설정해주세요.")
-
-        hts_orders_from_supabase(selected_user, account_index, is_test_mode=True)
+        selected_user, account_index = resolve_first_user_account(TEST_USER, TEST_ACCOUNT)
+        hts_orders_from_supabase(selected_user, account_index, is_test_mode=IS_TEST_MODE)
 
     except Exception as e:
         logging.info("에러가 발생했습니다:")
