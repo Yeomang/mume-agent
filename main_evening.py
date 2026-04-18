@@ -7,7 +7,7 @@ import logging
 import traceback
 import sys
 
-from utils import set_log_context, install_log_context_filter
+from utils import set_log_context, install_log_context_filter, send_telegram_message
 from hts_login import hts_login
 from hts_stock_balance_save_to_csv import save_data_stock_balance
 from stock_balance_data_preprocessing import stock_balance_data_preprocessing
@@ -16,6 +16,8 @@ from utils import kill_window_by_title
 from job_control import register_job_pid, unregister_job_pid
 from automation_target_store import load_automation_target
 from config import Config
+import csv
+import io
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -39,6 +41,133 @@ def log_uncaught_exceptions(exctype, value, tb):
     logging.error("".join(traceback.format_exception(exctype, value, tb)))
 
 sys.excepthook = log_uncaught_exceptions
+
+
+def _read_usd_deposit(user: str, account_index: int) -> float:
+    """외화예수금 CSV에서 USD 추정예수금을 읽어 반환한다. 실패 시 0."""
+    raw_dir = BASE_DIR / "data" / "foreign_deposit_raw"
+    csv_path = raw_dir / f"foreign_deposit_raw_{user}_{account_index}.csv"
+    if not csv_path.exists():
+        return 0.0
+    try:
+        raw_text = None
+        for enc in ("utf-8-sig", "cp949"):
+            try:
+                raw_text = csv_path.read_text(encoding=enc, errors="strict")
+                break
+            except (UnicodeDecodeError, ValueError):
+                continue
+        if raw_text is None:
+            raw_text = csv_path.read_text(encoding="cp949", errors="replace")
+
+        first_line = raw_text.split("\n", 1)[0]
+        delimiter = "\t" if "\t" in first_line else ","
+        reader = csv.DictReader(io.StringIO(raw_text), delimiter=delimiter)
+        for row in reader:
+            currency = (row.get("통화") or "").strip()
+            if currency == "USD":
+                val = str(row.get("외화추정예수금") or "0").replace(",", "").strip()
+                return float(val)
+    except Exception as e:
+        logging.warning(f"[예수금체크] USD 예수금 읽기 실패 ({csv_path.name}): {e}")
+    return 0.0
+
+
+def _estimate_total_buy_amount(user: str, account_index: int) -> float:
+    """Supabase에서 해당 계좌의 활성 사이클들의 예상 매수 금액 합계를 계산한다."""
+    try:
+        from supabase_client import get_supabase_client, supabase_fetch_all
+        from automation_target_store import get_auth_user_ids
+        sb = get_supabase_client()
+        if sb is None:
+            return 0.0
+
+        uids = get_auth_user_ids()
+        cycles_res = supabase_fetch_all(
+            lambda s, e: sb.table("cycle_master")
+            .select("id, status")
+            .in_("status", ["진행중", "시작전"])
+            .in_("auth_user_id", uids)
+            .eq("user_name", user)
+            .eq("account_index", account_index)
+            .eq("broker", "메리츠")
+            .range(s, e)
+            .execute()
+        )
+        cycle_ids = [int(r["id"]) for r in (cycles_res.data or []) if r.get("id")]
+        if not cycle_ids:
+            return 0.0
+
+        latest_res = supabase_fetch_all(
+            lambda s, e: sb.table("cycle_trades_latest")
+            .select("cycle_id, computed")
+            .in_("cycle_id", cycle_ids)
+            .range(s, e)
+            .execute()
+        )
+        total = 0.0
+        for r in (latest_res.data or []):
+            comp = r.get("computed") or {}
+            # 일반 LOC 매수
+            qty = comp.get("avg_loc_buy_qty")
+            price = comp.get("avg_loc_buy_price")
+            if qty and price:
+                try:
+                    total += float(qty) * float(price)
+                except (ValueError, TypeError):
+                    pass
+            # 추가 매수 (star/dip/quarter 등)
+            for q_key, p_key in [
+                ("star_loc_buy_qty", "star_loc_buy_price"),
+                ("dip_buy_qty", "dip_buy_price"),
+                ("q_dip_buy_qty", "q_dip_buy_price"),
+                ("qn10_loc_buy_qty", "qn10_loc_buy_price"),
+            ]:
+                q = comp.get(q_key)
+                p = comp.get(p_key)
+                if q and p:
+                    try:
+                        total += float(q) * float(p)
+                    except (ValueError, TypeError):
+                        pass
+        return total
+    except Exception as e:
+        logging.warning(f"[예수금체크] 매수 금액 추정 실패: {e}")
+        return 0.0
+
+
+def _check_cash_sufficiency(user: str, account_index: int):
+    """예수금이 예상 매수 금액 대비 부족하면 텔레그램 경고를 보낸다."""
+    usd_deposit = _read_usd_deposit(user, account_index)
+    if usd_deposit <= 0:
+        logging.info(f"[예수금체크] {user}/{account_index} USD 예수금 데이터 없음 — 체크 생략")
+        return
+
+    estimated_buy = _estimate_total_buy_amount(user, account_index)
+    if estimated_buy <= 0:
+        logging.info(f"[예수금체크] {user}/{account_index} 매수 예정 금액 없음 — 체크 생략")
+        return
+
+    logging.info(f"[예수금체크] {user}/{account_index} 예수금: ${usd_deposit:,.2f}, 예상 매수 합계: ${estimated_buy:,.2f}")
+
+    if usd_deposit < estimated_buy:
+        shortage = estimated_buy - usd_deposit
+        message = (
+            f"⚠️ *[예수금 부족 경고]*\n\n"
+            f"▶ 계좌: {user} | 메리츠 | {account_index}번째 계좌\n"
+            f"▶ USD 예수금: ${usd_deposit:,.2f}\n"
+            f"▶ 예상 매수 합계: ${estimated_buy:,.2f}\n"
+            f"▶ 부족액: ${shortage:,.2f}\n\n"
+            f"예수금이 부족하여 일부 주문이 실패할 수 있습니다."
+        )
+        send_telegram_message(
+            Config.TELEGRAM_BOT_TOKEN_ORDER,
+            Config.TELEGRAM_CHAT_ID,
+            message,
+        )
+        logging.warning(f"[예수금체크] 예수금 부족! 부족액: ${shortage:,.2f}")
+    else:
+        logging.info(f"[예수금체크] 예수금 충분 (여유: ${usd_deposit - estimated_buy:,.2f})")
 
 
 def run_evening_job(is_test_mode: bool = False, manual: bool = False):
@@ -120,6 +249,9 @@ def run_evening_job(is_test_mode: bool = False, manual: bool = False):
             # HTS에서 해외주식 보유잔고 데이터 csv로 저장 (계좌 레벨)
             save_data_stock_balance(user, account_index)
             stock_balance_data_preprocessing(user, account_index)
+
+            # 예수금 부족 여부 사전 체크 (부족 시 텔레그램 경고)
+            _check_cash_sufficiency(user, account_index)
 
             # Supabase에서 주문 데이터 읽어 매도/매수 실행 (사이클 레벨)
             hts_orders_from_supabase(
