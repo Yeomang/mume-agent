@@ -889,6 +889,67 @@ def deploy_status():
         return {"deployed_at": None, "message": "배포 정보를 읽을 수 없습니다."}
 
 
+@app.get("/cash-balance")
+def get_cash_balance():
+    """계좌별 외화예수금 조회 (저장된 CSV 기반)."""
+    results = []
+    raw_dir = BASE_DIR / "data" / "foreign_deposit_raw"
+    if not raw_dir.exists():
+        return {"accounts": [], "updated_at": None}
+
+    for f in sorted(raw_dir.glob("foreign_deposit_raw_*.csv")):
+        parts = f.stem.replace("foreign_deposit_raw_", "").rsplit("_", 1)
+        if len(parts) != 2:
+            continue
+        user_name, account_index = parts[0], parts[1]
+        try:
+            mtime = dt.datetime.fromtimestamp(f.stat().st_mtime).isoformat(timespec="seconds")
+            # 인코딩 시도: utf-8-sig → cp949
+            raw_text = None
+            for enc in ("utf-8-sig", "cp949"):
+                try:
+                    raw_text = f.read_text(encoding=enc, errors="strict")
+                    break
+                except (UnicodeDecodeError, ValueError):
+                    continue
+            if raw_text is None:
+                raw_text = f.read_text(encoding="cp949", errors="replace")
+
+            # 구분자 감지: 탭 우선, 없으면 콤마
+            first_line = raw_text.split("\n", 1)[0]
+            delimiter = "\t" if "\t" in first_line else ","
+
+            import io
+            reader = csv.DictReader(io.StringIO(raw_text), delimiter=delimiter)
+            for row in reader:
+                currency = (row.get("통화") or "").strip()
+                if not currency:
+                    continue
+
+                def parse_num(v):
+                    try:
+                        return float(str(v).replace(",", "").strip())
+                    except Exception:
+                        return 0.0
+
+                results.append({
+                    "user_name": user_name,
+                    "account_index": int(account_index),
+                    "currency": currency,
+                    "deposit": parse_num(row.get("외화예수금")),
+                    "estimated_deposit": parse_num(row.get("외화추정예수금")),
+                    "exchange_rate": parse_num(row.get("기준환율")),
+                    "krw_value": parse_num(row.get("원화평가금액(\\)")),
+                    "withdrawable": parse_num(row.get("출금가능금액")),
+                    "updated_at": mtime,
+                })
+        except Exception as e:
+            import logging
+            logging.warning(f"외화예수금 CSV 읽기 실패 ({f.name}): {e}")
+
+    return {"accounts": results}
+
+
 # ─────────────────────────────────────
 # 시작 시 자동 업데이트
 # ─────────────────────────────────────
