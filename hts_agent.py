@@ -57,6 +57,7 @@ JOB_CONFIG: Dict[str, Dict[str, Path]] = {
     "evening": {"script": BASE_DIR / "main_evening.py"},
     "aftermarket": {"script": BASE_DIR / "main_aftermarket.py"},
     "cancel_orders": {"script": BASE_DIR / "main_cancel_orders.py"},
+    "refresh_balance": {"script": BASE_DIR / "main_refresh_balance.py"},
 }
 
 JOB_LABEL: Dict[str, str] = {
@@ -64,6 +65,7 @@ JOB_LABEL: Dict[str, str] = {
     "evening": "Evening",
     "aftermarket": "Aftermarket",
     "cancel_orders": "Cancel Orders",
+    "refresh_balance": "Refresh Balance",
 }
 
 CURRENT_PROC: Dict[str, Optional[subprocess.Popen]] = {
