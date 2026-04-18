@@ -14,6 +14,45 @@ SCREEN_NUM_BALANCE = "6104"  # 해외주식 보유잔고 화면번호
 AUTO_ID_DROPDOWN_ACCOUNT = "3785"  # 계좌번호 드롭다운 필드 automation_id
 AUTO_ID_INQUIRY_BUTTON = "3815"  # 해외주식 보유잔고 조회 버튼 automation_id
 AUTO_ID_TABLE_BALANCE = "3860"  # 해외주식 보유잔고 화면에서 표 영역 automation_id
+AUTO_ID_TABLE_FOREIGN_DEPOSIT = "3880"  # 예수금 탭의 외화 예수금 표 영역 automation_id
+
+
+def _export_table_to_csv(
+    main_window, table_pane, save_path, label,
+    first_row_offset=60, export_menu_index=9,
+):
+    """우클릭 메뉴 → '파일로 보내기' → 'Csv로 저장' 흐름으로 테이블을 CSV 파일로 저장합니다.
+
+    first_row_offset: 테이블 상단(rect.top)으로부터 첫 데이터 행까지의 y 오프셋.
+                      헤더만 있고 행이 적은 테이블(예: 외화 예수금)은 값을 더 작게 조정해야 한다.
+    export_menu_index: 우클릭 메뉴에서 '파일로 보내기' 항목의 순번(1-based).
+                      잔고 탭 테이블은 9, 예수금 탭 외화예수금 테이블은 6 등 테이블마다 다르다.
+    """
+    rect = table_pane.rectangle()
+    table_width = rect.right - rect.left
+    x = int(rect.left + table_width / 2)
+    y = int(rect.top + first_row_offset)
+    click(button="right", coords=(x, y))
+    logging.info(f"{label} 테이블의 첫 행 중앙 부분의 좌표를 찾아 우클릭하였습니다.")
+    time.sleep(1)
+
+    send_keys(f"{{DOWN {export_menu_index}}}{{ENTER}}")
+    logging.info(f"'파일로 보내기' 버튼을 클릭하였습니다. (메뉴 {export_menu_index}번째)")
+    time.sleep(0.5)
+
+    send_keys("c")
+    logging.info("'Csv로 저장' 버튼을 클릭하였습니다.")
+    time.sleep(1)
+
+    dialog_found = wait_for_window("다른 이름으로 저장", main_window, "다른 이름으로 저장", "Window", timeout=10)
+    if dialog_found:
+        copy_to_clipboard(str(save_path))
+        send_keys("%n")
+        send_keys("^v{ENTER}")
+        logging.info(f"[정상 저장] {save_path}")
+        time.sleep(2)
+    else:
+        logging.warning(f"[저장 실패] '다른 이름으로 저장' 대화상자가 열리지 않음 ({label})")
 
 
 # main_window 하위의 모든 자식 및 자손 GUI 요소의 정보를 출력
@@ -69,6 +108,7 @@ def save_data_stock_balance(selected_user, account_index):
     dropdown.click_input()
     send_keys(f"{{PGUP}}{{DOWN {account_index}}}{{ENTER}}")
     logging.info(f"{selected_user}님의 {account_index}번째 계좌번호를 선택하였습니다.")
+    time.sleep(3)
 
     # '조회' 버튼 클릭
     inquiry_btn = find_control_by_criteria(main_window, "Button", automation_id=AUTO_ID_INQUIRY_BUTTON)
@@ -76,59 +116,61 @@ def save_data_stock_balance(selected_user, account_index):
         raise Exception("조회 버튼을 찾을 수 없습니다.")
     inquiry_btn.click_input()
     logging.info(f"'조회' 버튼을 클릭하였습니다.")
-    time.sleep(2)  # 조회 결과 로딩 대기
+    time.sleep(4)  # 조회 결과 로딩 대기
+
+    # '예수금' 탭이 열려있을 수 있으므로 '잔고' 탭을 명시적으로 클릭
+    balance_tab = find_control_by_criteria(order_window, "TabItem", title="잔고", delay=0.5, retries=5)
+    if not balance_tab:
+        raise Exception("'잔고' 탭을 찾을 수 없습니다.")
+    balance_tab.click_input()
+    logging.info("'잔고' 탭을 클릭하였습니다.")
+    time.sleep(1)  # 탭 전환 대기
 
     # 데이터 테이블 위치 찾기
     table_pane = find_control_by_criteria(main_window, "Pane", automation_id=AUTO_ID_TABLE_BALANCE, delay=2, retries=5)
     if not table_pane:
         raise Exception("보유잔고 데이터 테이블을 찾을 수 없습니다.")
-    rect = table_pane.rectangle()
 
-    # 테이블의 첫 번째의 행 좌표 계산(대충) 후 우클릭
-    table_width = rect.right - rect.left
-    table_height = rect.bottom - rect.top
-    x = int(rect.left + table_width/2)
-    y = int(rect.top + 60)
-    click(button="right", coords=(x, y))    
-    logging.info(f"데이터 테이블의 첫 행 중앙 부분의 좌표를 찾아 우클릭하였습니다.")
-    time.sleep(1)  # 우클릭 후 잠깐 대기 
+    # 보유잔고 테이블 CSV 저장
+    _export_table_to_csv(main_window, table_pane, save_path, label="보유잔고")
 
-    # "파일로 보내기" 항목 클릭 (우클릭 메뉴에서 9번째)
-    send_keys(f"{{DOWN 9}}{{ENTER}}")
-    logging.info(f"'파일로 보내기' 버튼을 클릭하였습니다.")
-    time.sleep(0.5)
+    logging.info(">>>>> HTS 해외주식 보유잔고 데이터 csv파일로 저장하기 완료! <<<<<")
 
-    # 'Csv로 저장' 항목 클릭
-    send_keys("c")  # Csv로 저장 단축키 실행
-    logging.info(f"'Csv로 저장' 버튼을 클릭하였습니다.")
-    time.sleep(1)
+    # ========== '예수금' 탭으로 전환 후 외화 예수금 CSV 저장 ==========
+    logging.info(">>>>> HTS 외화 예수금 데이터 csv파일로 저장하기 시작! <<<<<")
 
-    # "다른 이름으로 저장" 대화상자 뜰 때까지 기다리기
-    # 저장 대화상자 확인
-    dialog_found = wait_for_window("다른 이름으로 저장", main_window, "다른 이름으로 저장", "Window", timeout=10)
-    
-    # try:
-    #     wait_for_window("다른 이름으로 저장", main_window, "다른 이름으로 저장", "Window", timeout=10)
-    #     dialog_found = True
-    # except (TimeoutError, ElementNotFoundError):
-    #     dialog_found = False
+    fx_save_dir = Path("./data/foreign_deposit_raw")
+    fx_save_dir.mkdir(parents=True, exist_ok=True)
+    fx_save_path = (
+        Path(current_dir) / "data" / "foreign_deposit_raw"
+        / f"foreign_deposit_raw_{selected_user}_{account_index}.csv"
+    )
+    if fx_save_path.exists():
+        os.remove(fx_save_path)
 
-    
-    if dialog_found:
-        
+    deposit_tab = find_control_by_criteria(order_window, "TabItem", title="예수금", delay=0.5, retries=5)
+    if not deposit_tab:
+        raise Exception("'예수금' 탭을 찾을 수 없습니다.")
+    deposit_tab.click_input()
+    logging.info("'예수금' 탭을 클릭하였습니다.")
+    time.sleep(1.5)  # 탭 전환 및 데이터 로딩 대기
 
-        # 저장 진행
-        copy_to_clipboard(str(save_path))
-        send_keys("%n")
-        send_keys("^v{ENTER}")
-        logging.info(f"[정상 저장] {save_path}")
+    fx_table = find_control_by_criteria(
+        main_window, "Pane", automation_id=AUTO_ID_TABLE_FOREIGN_DEPOSIT, delay=2, retries=5
+    )
+    if not fx_table:
+        raise Exception("외화 예수금 데이터 테이블을 찾을 수 없습니다.")
 
-        # 저장 완료까지 대기
-        time.sleep(2)
+    # 외화 예수금 테이블은 헤더 + 1행 구조라 첫 행 y 오프셋을 더 작게 설정.
+    # 또한 우클릭 메뉴 구성이 잔고 탭과 달라 '파일로 보내기' 위치가 6번째.
+    _export_table_to_csv(
+        main_window, fx_table, fx_save_path,
+        label="외화 예수금",
+        first_row_offset=35,
+        export_menu_index=6,
+    )
 
-    else:
-        logging.warning("[저장 실패] '다른 이름으로 저장' 대화상자가 열리지 않음")
-    
+    logging.info(">>>>> HTS 외화 예수금 데이터 csv파일로 저장하기 완료! <<<<<")
 
     # 마우스 및 키보드 잠금 해제
     block_input(False)
@@ -136,33 +178,19 @@ def save_data_stock_balance(selected_user, account_index):
     order_window.close()
     logging.info("'해외주식 보유잔고' 창을 닫았습니다.")
 
-    logging.info(">>>>> HTS 해외주식 보유잔고 데이터 csv파일로 저장하기 완료! <<<<<")
-
 
 if __name__ == "__main__":
-    # 웹UI에서 저장한 자동 실행 대상에서 첫 번째 사용자/계좌 로드 (테스트용)
-    from automation_target_store import load_automation_target_with_meta
-    
-    targets, _ = load_automation_target_with_meta(None, include_cycles=True)
-    # 모든 job에서 첫 번째 사용자 찾기
-    users = {}
-    for job_targets in targets.values() if isinstance(targets, dict) else []:
-        if isinstance(job_targets, dict):
-            users.update(job_targets)
-            break
-    
-    selected_user = list(users.keys())[0] if users else ""
-    account_index = 1
-    if selected_user and users.get(selected_user):
-        # 첫 번째 계좌 사용
-        first_account = users[selected_user][0] if isinstance(users[selected_user], list) else None
-        if isinstance(first_account, dict):
-            account_index = first_account.get("account", 1)
-        elif isinstance(first_account, int):
-            account_index = first_account
-    
-    if not selected_user:
-        print("경고: 저장된 사용자/계좌 설정이 없습니다. 웹UI에서 먼저 설정해주세요.")
-    else:
-        save_data_stock_balance(selected_user, account_index)
+    # ------------------------------------------------------------
+    # 로컬 테스트용 실행 블록
+    # - 아래 TEST_USER / TEST_ACCOUNT 를 직접 지정하면 해당 값으로 실행됨.
+    #   (예: TEST_USER = "최용준", TEST_ACCOUNT = 2)
+    # - None 으로 두면 Supabase automation_target 에서 첫 번째 사용자/계좌를 자동 로드.
+    # ------------------------------------------------------------
+    TEST_USER: str | None = "홍승표"
+    TEST_ACCOUNT: int | None = 3
+
+    from automation_target_store import resolve_first_user_account
+
+    selected_user, account_index = resolve_first_user_account(TEST_USER, TEST_ACCOUNT)
+    save_data_stock_balance(selected_user, account_index)
 
