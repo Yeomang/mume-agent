@@ -139,16 +139,17 @@ def _estimate_total_buy_amount(user: str, account_index: int) -> float:
 def _check_cash_sufficiency(user: str, account_index: int):
     """예수금이 예상 매수 금액 대비 부족하면 텔레그램 경고를 보낸다."""
     usd_deposit = _read_usd_deposit(user, account_index)
-    if usd_deposit <= 0:
-        logging.info(f"[예수금체크] {user}/{account_index} USD 예수금 데이터 없음 — 체크 생략")
-        return
-
     estimated_buy = _estimate_total_buy_amount(user, account_index)
-    if estimated_buy <= 0:
-        logging.info(f"[예수금체크] {user}/{account_index} 매수 예정 금액 없음 — 체크 생략")
-        return
 
     logging.info(f"[예수금체크] {user}/{account_index} 예수금: ${usd_deposit:,.2f}, 예상 매수 합계: ${estimated_buy:,.2f}")
+
+    if usd_deposit <= 0:
+        logging.info(f"[예수금체크] {user}/{account_index} USD 예수금 데이터 없음")
+        return
+
+    if estimated_buy <= 0:
+        logging.info(f"[예수금체크] {user}/{account_index} 매수 예정 금액 없음 — 예수금만 확인 완료")
+        return
 
     if usd_deposit < estimated_buy:
         shortage = estimated_buy - usd_deposit
