@@ -110,8 +110,9 @@ async def verify_agent_key(request: Request, call_next):
     if AGENT_KEY and request.url.path != "/health" and request.headers.get("X-Agent-Key") != AGENT_KEY:
         return JSONResponse(status_code=401, content={"detail": "Invalid agent key"})
     response = await call_next(request)
-    # health 외 요청만 로깅
-    if request.url.path != "/health":
+    # 폴링성 GET 요청은 로깅 제외 (health, monitor, status, logs, processes 등)
+    _skip_log = {"/health", "/monitor", "/status", "/logs", "/processes", "/password-status", "/deploy-status"}
+    if request.url.path not in _skip_log:
         _agent_logger.info(f"{request.method} {request.url.path} → {response.status_code}")
     return response
 
