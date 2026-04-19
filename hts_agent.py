@@ -25,6 +25,8 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.gzip import GZipMiddleware
 
+import logging
+
 from config import Config
 from job_control import read_job_pids, unregister_job_pid
 from secrets_manager import (
@@ -42,7 +44,15 @@ from utils import block_input
 # ─────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
 LOG_FILE = BASE_DIR / "log.log"
+AGENT_LOG_FILE = BASE_DIR / "log_agent.log"
 AGENT_KEY = os.getenv("HTS_AGENT_KEY", "")
+
+# 에이전트 서버 전용 파일 로깅 (uvicorn 프로세스 시작/종료/에러 추적용)
+_agent_logger = logging.getLogger("hts_agent")
+_agent_logger.setLevel(logging.INFO)
+_agent_file_handler = logging.FileHandler(AGENT_LOG_FILE, encoding="utf-8")
+_agent_file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+_agent_logger.addHandler(_agent_file_handler)
 
 if platform.system() == "Windows":
     import win32gui
@@ -84,12 +94,26 @@ app = FastAPI(title="HTS Agent")
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 
+@app.on_event("startup")
+def on_startup():
+    _agent_logger.info("═══ HTS Agent 서버 시작 (port 9000) ═══")
+
+
+@app.on_event("shutdown")
+def on_shutdown():
+    _agent_logger.info("═══ HTS Agent 서버 종료 ═══")
+
+
 @app.middleware("http")
 async def verify_agent_key(request: Request, call_next):
     # /health는 인증 없이 접근 허용 (연결 테스트, 모니터링용)
     if AGENT_KEY and request.url.path != "/health" and request.headers.get("X-Agent-Key") != AGENT_KEY:
         return JSONResponse(status_code=401, content={"detail": "Invalid agent key"})
-    return await call_next(request)
+    response = await call_next(request)
+    # health 외 요청만 로깅
+    if request.url.path != "/health":
+        _agent_logger.info(f"{request.method} {request.url.path} → {response.status_code}")
+    return response
 
 
 # ─────────────────────────────────────
