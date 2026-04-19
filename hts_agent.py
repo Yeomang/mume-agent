@@ -50,6 +50,7 @@ AGENT_KEY = os.getenv("HTS_AGENT_KEY", "")
 # 에이전트 서버 전용 파일 로깅 (uvicorn 프로세스 시작/종료/에러 추적용)
 _agent_logger = logging.getLogger("hts_agent")
 _agent_logger.setLevel(logging.INFO)
+_agent_logger.propagate = False
 _agent_file_handler = logging.FileHandler(AGENT_LOG_FILE, encoding="utf-8")
 _agent_file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
 _agent_logger.addHandler(_agent_file_handler)
