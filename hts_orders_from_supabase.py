@@ -80,7 +80,7 @@ def _get_active_cycles(sb, selected_user, account_index, auth_user_ids=None, cyc
     uids = auth_user_ids or get_auth_user_ids()
     res = supabase_fetch_all(
         lambda s, e: sb.table("cycle_master")
-        .select("id, cycle_seq, status, method, stock_code, principal, split_count, target_rate, dip_buy_rate, max_drop_rate, prev_close_price")
+        .select("id, cycle_seq, status, method, stock_code, principal, split_count, target_rate, dip_buy_rate, max_drop_rate")
         .in_("status", ["진행중", "시작전"])
         .in_("auth_user_id", uids)
         .eq("user_name", selected_user)
@@ -372,17 +372,18 @@ def hts_orders_from_supabase(
         # 주문 리스트 추출
         # 시작전 사이클이고 computed가 비어있으면 첫 매수 주문 직접 계산
         if cycle.get("status") == "시작전" and (not computed or not computed.get("avg_loc_buy_qty")):
-            prev_close = cycle.get("prev_close_price")
-            # prev_close_price가 없으면 실시간 조회 시도
-            if not prev_close or float(prev_close or 0) <= 0:
-                try:
-                    t = yf.Ticker(ticker)
-                    info = t.fast_info if hasattr(t, 'fast_info') else {}
-                    prev_close = getattr(info, 'previous_close', None) or info.get('previousClose')
-                    if prev_close and float(prev_close) > 0:
-                        logging.info(f"시작전 사이클: prev_close_price를 실시간 조회로 보충 (${prev_close})")
-                except Exception as e:
-                    logging.warning(f"prev_close_price 실시간 조회 실패: {e}")
+            # 전일종가 실시간 조회
+            prev_close = None
+            try:
+                t = yf.Ticker(ticker)
+                info = t.fast_info if hasattr(t, 'fast_info') else {}
+                prev_close = getattr(info, 'previous_close', None) or info.get('previousClose')
+                if prev_close and float(prev_close) > 0:
+                    logging.info(f"시작전 사이클: 전일종가 실시간 조회 ${prev_close}")
+                else:
+                    prev_close = None
+            except Exception as e:
+                logging.warning(f"전일종가 실시간 조회 실패: {e}")
             principal = float(cycle.get("principal") or 0)
             split_count = int(cycle.get("split_count") or 1)
             max_drop_rate = float(cycle.get("max_drop_rate") or -30)
