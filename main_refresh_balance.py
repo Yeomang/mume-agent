@@ -97,7 +97,12 @@ def run_refresh_balance():
             # HTS에서 보유잔고 + 외화예수금 CSV 저장
             save_data_stock_balance(user, account_index)
             stock_balance_data_preprocessing(user, account_index)
-            logging.info(f"[{user}/{account_index}] 잔고·예수금 CSV 최신화 완료")
+
+            # 외화예수금을 Supabase에 동기화
+            from main_evening import _sync_cash_balance_to_db
+            _sync_cash_balance_to_db(user, account_index)
+
+            logging.info(f"[{user}/{account_index}] 잔고·예수금 CSV 최신화 + DB 동기화 완료")
 
         kill_window_by_title(hts_window_name)
 

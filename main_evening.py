@@ -136,6 +136,75 @@ def _estimate_total_buy_amount(user: str, account_index: int) -> float:
         return 0.0
 
 
+def _sync_cash_balance_to_db(user: str, account_index: int):
+    """외화예수금 CSV를 읽어 Supabase에 upsert한다."""
+    try:
+        from supabase_client import get_supabase_client
+        from automation_target_store import get_auth_user_id_for
+        sb = get_supabase_client()
+        if sb is None:
+            return
+
+        auth_user_id = get_auth_user_id_for(user)
+        if not auth_user_id:
+            return
+
+        usd_deposit = _read_usd_deposit(user, account_index)
+        if usd_deposit <= 0:
+            return
+
+        # CSV에서 상세 데이터 읽기
+        raw_dir = BASE_DIR / "data" / "foreign_deposit_raw"
+        csv_path = raw_dir / f"foreign_deposit_raw_{user}_{account_index}.csv"
+        if not csv_path.exists():
+            return
+
+        raw_text = None
+        for enc in ("utf-8-sig", "cp949"):
+            try:
+                raw_text = csv_path.read_text(encoding=enc, errors="strict")
+                break
+            except (UnicodeDecodeError, ValueError):
+                continue
+        if raw_text is None:
+            raw_text = csv_path.read_text(encoding="cp949", errors="replace")
+
+        first_line = raw_text.split("\n", 1)[0]
+        delimiter = "\t" if "\t" in first_line else ","
+        reader = csv.DictReader(io.StringIO(raw_text), delimiter=delimiter)
+
+        def parse_num(v):
+            try:
+                return float(str(v).replace(",", "").strip())
+            except Exception:
+                return 0.0
+
+        for row in reader:
+            currency = (row.get("통화") or "").strip()
+            if not currency:
+                continue
+            record = {
+                "auth_user_id": auth_user_id,
+                "user_name": user,
+                "account_index": account_index,
+                "currency": currency,
+                "deposit": parse_num(row.get("외화예수금")),
+                "estimated_deposit": parse_num(row.get("외화추정예수금")),
+                "exchange_rate": parse_num(row.get("기준환율")),
+                "krw_value": parse_num(row.get("원화평가금액(\\)")),
+                "withdrawable": parse_num(row.get("출금가능금액")),
+                "updated_at": "now()",
+            }
+            sb.table("account_cash_balance").upsert(
+                record,
+                on_conflict="auth_user_id,user_name,account_index,currency",
+            ).execute()
+
+        logging.info(f"[예수금DB] {user}/{account_index} Supabase 동기화 완료")
+    except Exception as e:
+        logging.warning(f"[예수금DB] Supabase 동기화 실패: {e}")
+
+
 def _check_cash_sufficiency(user: str, account_index: int):
     """예수금이 예상 매수 금액 대비 부족하면 텔레그램 경고를 보낸다."""
     usd_deposit = _read_usd_deposit(user, account_index)
@@ -250,6 +319,9 @@ def run_evening_job(is_test_mode: bool = False, manual: bool = False):
             # HTS에서 해외주식 보유잔고 데이터 csv로 저장 (계좌 레벨)
             save_data_stock_balance(user, account_index)
             stock_balance_data_preprocessing(user, account_index)
+
+            # 외화예수금을 Supabase에 동기화
+            _sync_cash_balance_to_db(user, account_index)
 
             # 예수금 부족 여부 사전 체크 (부족 시 텔레그램 경고)
             _check_cash_sufficiency(user, account_index)
