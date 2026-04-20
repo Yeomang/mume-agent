@@ -349,6 +349,16 @@ def hts_orders_from_supabase(
         # 시작전 사이클이고 computed가 비어있으면 첫 매수 주문 직접 계산
         if cycle.get("status") == "시작전" and (not computed or not computed.get("avg_loc_buy_qty")):
             prev_close = cycle.get("prev_close_price")
+            # prev_close_price가 없으면 실시간 조회 시도
+            if not prev_close or float(prev_close or 0) <= 0:
+                try:
+                    t = yf.Ticker(ticker)
+                    info = t.fast_info if hasattr(t, 'fast_info') else {}
+                    prev_close = getattr(info, 'previous_close', None) or info.get('previousClose')
+                    if prev_close and float(prev_close) > 0:
+                        logging.info(f"시작전 사이클: prev_close_price를 실시간 조회로 보충 (${prev_close})")
+                except Exception as e:
+                    logging.warning(f"prev_close_price 실시간 조회 실패: {e}")
             principal = float(cycle.get("principal") or 0)
             split_count = int(cycle.get("split_count") or 1)
             max_drop_rate = float(cycle.get("max_drop_rate") or -30)
@@ -472,14 +482,17 @@ def hts_orders_from_supabase(
             order_history_data_preprocessing(selected_user, account_index)
             file_path = f'./data/order_history_processed/order_history_processed_{selected_user}_{account_index}.csv'
             df_order_history = load_csv_if_exists(file_path)
-            df_order_history = df_order_history.sort_values(by='주문시간').reset_index(drop=True)
-            df_order_history_filtered = df_order_history[df_order_history['종목코드'] == ticker]
-            order_lines = "\n".join([
-                f"   •  ${float(str(row['주문가']).replace(',', '')):,.2f}  |  "
-                f"{'-' if '매도' in row['매매구분'] else ''}{int(float(str(row['주문량']).replace(',', '')))}주  |  "
-                f"{'지정가' if row['주문유형'] == '보통' else row['주문유형']}"
-                for _, row in df_order_history_filtered.iterrows()
-            ])
+            if df_order_history is None or df_order_history.empty:
+                order_lines = "(주문내역 CSV 없음)"
+            else:
+                df_order_history = df_order_history.sort_values(by='주문시간').reset_index(drop=True)
+                df_order_history_filtered = df_order_history[df_order_history['종목코드'] == ticker]
+                order_lines = "\n".join([
+                    f"   •  ${float(str(row['주문가']).replace(',', '')):,.2f}  |  "
+                    f"{'-' if '매도' in row['매매구분'] else ''}{int(float(str(row['주문량']).replace(',', '')))}주  |  "
+                    f"{'지정가' if row['주문유형'] == '보통' else row['주문유형']}"
+                    for _, row in df_order_history_filtered.iterrows()
+                ])
         else:
             order_lines = "테스트모드"
 
