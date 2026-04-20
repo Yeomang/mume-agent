@@ -341,9 +341,33 @@ def hts_orders_from_supabase(
                     send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message)
                     continue
             else:
-                logging.warning(f"[경고] 종목코드 '{ticker}' 가 df_balance에 존재하지 않습니다.")
+                # CSV에 해당 종목이 없음: 시작전(보유수0)이면 정상, 진행중이면 경고
+                if holding_qty_from_db > 0:
+                    logging.warning(f"[경고] 종목코드 '{ticker}' 가 df_balance에 존재하지 않지만 DB 보유수는 {holding_qty_from_db}주. 스킵합니다.")
+                    send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+                        f"⚠️ *[무매사이클 #{cycle_seq}] 잔고 확인 불가*\n\n"
+                        f"▶ 종목: {ticker} ({method_ver})\n"
+                        f"▶ DB 보유수: {holding_qty_from_db}주\n"
+                        f"▶ HTS 잔고 CSV에 해당 종목 없음\n"
+                        f"▶ 잔고 확인 불가로 주문을 건너뜁니다."
+                    )
+                    continue
+                else:
+                    logging.info(f"종목코드 '{ticker}'가 df_balance에 없지만 DB 보유수도 0이므로 정상 (시작전 사이클)")
         else:
-            logging.info("해외주식 보유잔고 CSV 파일이 없으므로 DB에 기록된 최신 보유수와 일치여부 확인 불가")
+            # CSV 파일 자체가 없음
+            if holding_qty_from_db > 0:
+                logging.warning(f"해외주식 보유잔고 CSV 파일이 없고 DB 보유수는 {holding_qty_from_db}주. 진행중 사이클이므로 스킵합니다.")
+                send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+                    f"⚠️ *[무매사이클 #{cycle_seq}] 잔고 CSV 없음*\n\n"
+                    f"▶ 종목: {ticker} ({method_ver})\n"
+                    f"▶ DB 보유수: {holding_qty_from_db}주\n"
+                    f"▶ 보유잔고 CSV 저장 실패로 잔고 확인 불가\n"
+                    f"▶ 주문을 건너뜁니다."
+                )
+                continue
+            else:
+                logging.info("해외주식 보유잔고 CSV 파일이 없지만 DB 보유수가 0이므로 진행 (시작전 사이클)")
 
         # 주문 리스트 추출
         # 시작전 사이클이고 computed가 비어있으면 첫 매수 주문 직접 계산
