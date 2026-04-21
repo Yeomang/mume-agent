@@ -283,10 +283,7 @@ def orders_execution_update_supabase(
             send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
                 f"💵 *[무매사이클 #{cycle_seq}] 추가 체결 없음*\n\n"
                 f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
-                f"▶ 종목: *{ticker} ({method_ver})*\n"
-                f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | 1회매수금: ${_per_buy:,.0f}\n"
-                f"▶ 진행률: {_progress_display} ({_t_display})\n"
-                f"▶ 실현손익금: {_pnl_sign}${abs(_cumulative_pnl):,.2f}")
+                f"▶ 종목: *{ticker} ({method_ver})*")
         elif is_rerun and added_count > 0:
             # 2차 실행, 추가 체결 있음
             message = (
