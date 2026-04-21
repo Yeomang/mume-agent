@@ -205,6 +205,59 @@ def _sync_cash_balance_to_db(user: str, account_index: int):
         logging.warning(f"[예수금DB] Supabase 동기화 실패: {e}")
 
 
+def _sync_stock_balance_to_db(user: str, account_index: int):
+    """보유잔고 CSV를 읽어 Supabase에 upsert한다."""
+    try:
+        from supabase_client import get_supabase_client
+        from automation_target_store import get_auth_user_id_for
+        from utils import load_csv_if_exists
+        sb = get_supabase_client()
+        if sb is None:
+            return
+
+        auth_user_id = get_auth_user_id_for(user)
+        if not auth_user_id:
+            return
+
+        file_path = f'./data/stock_balance_processed/stock_balance_processed_{user}_{account_index}.csv'
+        df = load_csv_if_exists(file_path)
+        if df is None or df.empty:
+            return
+
+        def parse_num(v):
+            try:
+                return float(str(v).replace(",", "").strip())
+            except Exception:
+                return 0.0
+
+        for _, row in df.iterrows():
+            stock_code = str(row.get("종목코드", "")).strip()
+            if not stock_code:
+                continue
+            record = {
+                "auth_user_id": auth_user_id,
+                "user_name": user,
+                "account_index": account_index,
+                "stock_code": stock_code,
+                "holding_qty": int(parse_num(row.get("보유수량", 0))),
+                "current_price": parse_num(row.get("현재가", 0)),
+                "avg_price": parse_num(row.get("평균가", 0)),
+                "eval_amount": parse_num(row.get("평가금액(외화)", 0)),
+                "purchase_amount": parse_num(row.get("매입금액(외화)", 0)),
+                "profit": parse_num(row.get("평가손익", 0)),
+                "profit_rate": parse_num(row.get("수익률(%)", 0)),
+                "updated_at": "now()",
+            }
+            sb.table("account_stock_balance").upsert(
+                record,
+                on_conflict="auth_user_id,user_name,account_index,stock_code",
+            ).execute()
+
+        logging.info(f"[잔고DB] {user}/{account_index} Supabase 동기화 완료")
+    except Exception as e:
+        logging.warning(f"[잔고DB] Supabase 동기화 실패: {e}")
+
+
 def _check_cash_sufficiency(user: str, account_index: int):
     """예수금이 예상 매수 금액 대비 부족하면 텔레그램 경고를 보낸다."""
     usd_deposit = _read_usd_deposit(user, account_index)
@@ -320,8 +373,9 @@ def run_evening_job(is_test_mode: bool = False, manual: bool = False):
             save_data_stock_balance(user, account_index)
             stock_balance_data_preprocessing(user, account_index)
 
-            # 외화예수금을 Supabase에 동기화
+            # 외화예수금 + 보유잔고를 Supabase에 동기화
             _sync_cash_balance_to_db(user, account_index)
+            _sync_stock_balance_to_db(user, account_index)
 
             # 예수금 부족 여부 사전 체크 (부족 시 텔레그램 경고)
             _check_cash_sufficiency(user, account_index)

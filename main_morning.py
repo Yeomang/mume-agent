@@ -140,9 +140,10 @@ def run_morning_job(is_test_mode: bool = False, manual: bool = False):
             save_data_stock_balance(user, account_index)
             stock_balance_data_preprocessing(user, account_index)
 
-            # 외화예수금을 Supabase에 동기화
-            from main_evening import _sync_cash_balance_to_db
+            # 외화예수금 + 보유잔고를 Supabase에 동기화
+            from main_evening import _sync_cash_balance_to_db, _sync_stock_balance_to_db
             _sync_cash_balance_to_db(user, account_index)
+            _sync_stock_balance_to_db(user, account_index)
 
             # Supabase에 체결내역 업데이트 (사이클 레벨)
             if inquiry_start_date and inquiry_end_date:
