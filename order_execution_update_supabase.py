@@ -23,7 +23,7 @@ def _get_active_cycles(sb, selected_user, account_index, auth_user_ids=None, cyc
     uids = auth_user_ids or get_auth_user_ids()
     res = supabase_fetch_all(
         lambda s, e: sb.table("cycle_master")
-        .select("id, cycle_seq, status, method, stock_code, auth_user_id, principal, split_count")
+        .select("id, cycle_seq, status, method, stock_code, auth_user_id, principal, split_count, start_date")
         .in_("status", ["진행중", "시작전"])
         .in_("auth_user_id", uids)
         .eq("user_name", selected_user)
@@ -212,24 +212,9 @@ def orders_execution_update_supabase(
 
         logging.info(f"[종목코드 '{ticker}' 내역 {len(filtered_df)}건]\n{filtered_df}")
 
-        # computed에서 추가 정보 가져오기
-        _computed = {}
-        try:
-            _comp_res = sb.table("cycle_trades_latest").select("computed").eq("cycle_id", cycle_id).execute()
-            if _comp_res.data:
-                _computed = _comp_res.data[0].get("computed") or {}
-        except Exception:
-            pass
         _principal = float(cycle.get("principal") or 0)
         _split_count = int(cycle.get("split_count") or 1)
-        _t_value = _computed.get("t_value", 0) or 0
-        _progress_rate = _computed.get("progress_rate", 0) or 0
-        _per_buy = _computed.get("dynamic_per_buy") or _computed.get("repeating_per_buy") or _computed.get("per_buy") or (_principal / _split_count if _split_count else 0)
-        _cumulative_pnl = _computed.get("cumulative_pnl", 0) or 0
-        _avg_price = float(_computed.get("avg_price") or 0)
-        _t_display = f"{float(_t_value):.1f}T" if _t_value else "0T"
-        _progress_display = f"{_progress_rate * 100:.1f}%" if _progress_rate and abs(_progress_rate) <= 1 else f"{_progress_rate:.1f}%"
-        _pnl_sign = "+" if _cumulative_pnl >= 0 else ""
+        _start_date = cycle.get("start_date") or "-"
 
         # 텔레그램 메시지용 주문 내역 포맷 (가격 내림차순)
         _sorted_df = filtered_df.copy()
@@ -278,65 +263,33 @@ def orders_execution_update_supabase(
         executed_count = len(filtered_df[filtered_df['체결수량'] != 0])
         added_count = executed_count - _prev_trade_count_for_telegram
 
-        if is_rerun and added_count <= 0:
-            # 2차 실행인데 추가 체결 없음
-            send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
-                f"💵 *[무매사이클 #{cycle_seq}] 추가 체결 없음*\n\n"
-                f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
-                f"▶ 종목: *{ticker} ({method_ver})*")
-        elif is_rerun and added_count > 0:
-            # 2차 실행, 추가 체결 있음
-            message = (
-                f"💵 *[무매사이클 #{cycle_seq}] 추가 체결 {added_count}건*\n\n"
-                f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
-                f"▶ 종목: *{ticker} ({method_ver})*\n"
-                f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | 1회매수금: ${_per_buy:,.0f}\n"
-                f"▶ 진행률: {_progress_display} ({_t_display})\n"
-                f"▶ 실현손익금: {_pnl_sign}${abs(_cumulative_pnl):,.2f}\n"
-                f"▶ 실제 HTS 체결내역\n"
-                f"{formatted_orders}"
-            )
-            send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message)
-        elif df_balance is not None and not df_balance.empty:
-            filtered = df_balance[df_balance['종목코드'] == ticker]
-            if not filtered.empty:
-                balance_from_hts = str(filtered['보유수량'].iloc[0])
-                current_price = filtered['현재가'].iloc[0]
-                average_price = filtered['평균가'].iloc[0]
-                profit = filtered['평가손익'].iloc[0]
-                profit_rate = filtered['수익률(%)'].iloc[0]
-                eval_amount = filtered['평가금액(외화)'].iloc[0]
-                purchase_amount = filtered['매입금액(외화)'].iloc[0]
+        # computed 조회 헬퍼 (INSERT+recompute 후 다시 호출하여 체결 후 데이터 사용)
+        def _load_computed_for_telegram():
+            _computed = {}
+            try:
+                _comp_res = sb.table("cycle_trades_latest").select("computed").eq("cycle_id", cycle_id).execute()
+                if _comp_res.data:
+                    _computed = _comp_res.data[0].get("computed") or {}
+            except Exception:
+                pass
+            _t_value = _computed.get("t_value", 0) or 0
+            _progress_rate = _computed.get("progress_rate", 0) or 0
+            _per_buy = _computed.get("dynamic_per_buy") or _computed.get("repeating_per_buy") or _computed.get("per_buy") or (_principal / _split_count if _split_count else 0)
+            _cumulative_pnl = _computed.get("cumulative_pnl", 0) or 0
+            _avg_price = float(_computed.get("avg_price") or 0)
+            _t_display = f"{float(_t_value):.1f}T" if _t_value else "0T"
+            _progress_display = f"{_progress_rate * 100:.1f}%" if _progress_rate and abs(_progress_rate) <= 1 else f"{_progress_rate:.1f}%"
+            _pnl_sign = "+" if _cumulative_pnl >= 0 else ""
+            return _computed, _t_display, _progress_display, _per_buy, _cumulative_pnl, _avg_price, _pnl_sign
 
-                message = (
-                    f"💵 *[무매사이클 #{cycle_seq}] 매매 체결 내역*\n\n"
-                    f"▶ {inquiry_start_date}~{inquiry_end_date}\n"
-                    f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
-                    f"▶ 종목: *{ticker} ({method_ver})*\n"
-                    f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | 1회매수금: ${_per_buy:,.0f}\n"
-                    f"▶ 보유수량: {balance_from_hts}주 | 진행률: {_progress_display} ({_t_display})\n"
-                    f"▶ 현재가: ${current_price} | 평단가: ${average_price}\n"
-                    f"▶ 평가손익: ${profit} ({profit_rate}%)\n"
-                    f"▶ 실현손익금: {_pnl_sign}${abs(_cumulative_pnl):,.2f}\n"
-                    f"▶ 실제 HTS 체결내역\n"
-                    f"{formatted_orders}"
-                )
-                send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message)
-            else:
-                logging.warning(f"[경고] 종목코드 '{ticker}' 가 df_balance에 존재하지 않습니다.")
-                message = (
-                    f"💵 *[무매사이클 #{cycle_seq}] 매매 체결 내역*\n\n"
-                    f"▶ {inquiry_start_date}~{inquiry_end_date}\n"
-                    f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
-                    f"▶ 종목: *{ticker} ({method_ver})*\n"
-                    f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | 1회매수금: ${_per_buy:,.0f}\n"
-                    f"▶ 진행률: {_progress_display} ({_t_display})\n"
-                    f"▶ 실현손익금: {_pnl_sign}${abs(_cumulative_pnl):,.2f}\n"
-                    f"▶ 현재 해당종목의 잔고 없음\n"
-                    f"▶ 실제 HTS 체결내역\n"
-                    f"{formatted_orders}"
-                )
-                send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message)
+        # INSERT 전 체결 전 computed (매도 손익 계산용)
+        _, _, _, _, _, _avg_price, _ = _load_computed_for_telegram()
+
+        # 텔레그램 메시지는 INSERT+recompute 후에 전송 (체결 후 computed 사용)
+        _telegram_context = {
+            "is_rerun": is_rerun, "added_count": added_count,
+            "formatted_orders": formatted_orders, "df_balance": df_balance,
+        }
 
         # 주문일자 → trade_date 변환
         trade_date = None
@@ -406,6 +359,61 @@ def orders_execution_update_supabase(
                     f"(테스트모드) INSERT 예정 데이터: "
                     f"{order_date}, {row['체결단가']}, {row['체결수량']}"
                 )
+
+        # ── 텔레그램 메시지 전송 (INSERT+recompute 후 — 체결 후 computed 사용) ──
+        _, _t_display, _progress_display, _per_buy, _cumulative_pnl, _, _pnl_sign = _load_computed_for_telegram()
+        _ctx = _telegram_context
+
+        if _ctx["is_rerun"] and _ctx["added_count"] <= 0:
+            send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+                f"💵 *[무매사이클 #{cycle_seq}] 추가 체결 없음*\n\n"
+                f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
+                f"▶ 종목: *{ticker} ({method_ver})*")
+        elif _ctx["is_rerun"] and _ctx["added_count"] > 0:
+            send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+                f"💵 *[무매사이클 #{cycle_seq}] 추가 체결 {_ctx['added_count']}건*\n\n"
+                f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
+                f"▶ 종목: *{ticker} ({method_ver})*\n"
+                f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | 1회매수금: ${_per_buy:,.0f}\n"
+                f"▶ 시작일: {_start_date}\n"
+                f"▶ 진행률: {_progress_display} ({_t_display})\n"
+                f"▶ 실현손익금: {_pnl_sign}${abs(_cumulative_pnl):,.2f}\n"
+                f"▶ 실제 HTS 체결내역\n"
+                f"{_ctx['formatted_orders']}")
+        elif _ctx["df_balance"] is not None and not _ctx["df_balance"].empty:
+            filtered = _ctx["df_balance"][_ctx["df_balance"]['종목코드'] == ticker]
+            if not filtered.empty:
+                balance_from_hts = str(filtered['보유수량'].iloc[0])
+                current_price = filtered['현재가'].iloc[0]
+                average_price = filtered['평균가'].iloc[0]
+                profit = filtered['평가손익'].iloc[0]
+                profit_rate = filtered['수익률(%)'].iloc[0]
+                send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+                    f"💵 *[무매사이클 #{cycle_seq}] 매매 체결 내역*\n\n"
+                    f"▶ {inquiry_start_date}~{inquiry_end_date}\n"
+                    f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
+                    f"▶ 종목: *{ticker} ({method_ver})*\n"
+                    f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | 1회매수금: ${_per_buy:,.0f}\n"
+                    f"▶ 시작일: {_start_date}\n"
+                    f"▶ 보유수량: {balance_from_hts}주 | 진행률: {_progress_display} ({_t_display})\n"
+                    f"▶ 현재가: ${current_price} | 평단가: ${average_price}\n"
+                    f"▶ 평가손익: ${profit} ({profit_rate}%)\n"
+                    f"▶ 실현손익금: {_pnl_sign}${abs(_cumulative_pnl):,.2f}\n"
+                    f"▶ 실제 HTS 체결내역\n"
+                    f"{_ctx['formatted_orders']}")
+            else:
+                send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+                    f"💵 *[무매사이클 #{cycle_seq}] 매매 체결 내역*\n\n"
+                    f"▶ {inquiry_start_date}~{inquiry_end_date}\n"
+                    f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
+                    f"▶ 종목: *{ticker} ({method_ver})*\n"
+                    f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | 1회매수금: ${_per_buy:,.0f}\n"
+                    f"▶ 시작일: {_start_date}\n"
+                    f"▶ 진행률: {_progress_display} ({_t_display})\n"
+                    f"▶ 실현손익금: {_pnl_sign}${abs(_cumulative_pnl):,.2f}\n"
+                    f"▶ 현재 해당종목의 잔고 없음\n"
+                    f"▶ 실제 HTS 체결내역\n"
+                    f"{_ctx['formatted_orders']}")
 
         logging.info(f"{cycle_seq}번 사이클 체결내역 업데이트 완료!")
 
