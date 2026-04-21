@@ -80,7 +80,7 @@ def _get_active_cycles(sb, selected_user, account_index, auth_user_ids=None, cyc
     uids = auth_user_ids or get_auth_user_ids()
     res = supabase_fetch_all(
         lambda s, e: sb.table("cycle_master")
-        .select("id, cycle_seq, status, method, stock_code, principal, split_count, target_rate, dip_buy_rate, max_drop_rate")
+        .select("id, cycle_seq, status, method, stock_code, principal, split_count, target_rate, dip_buy_rate, max_drop_rate, start_date")
         .in_("status", ["진행중", "시작전"])
         .in_("auth_user_id", uids)
         .eq("user_name", selected_user)
@@ -534,11 +534,14 @@ def hts_orders_from_supabase(
         t_display = f"{float(t_value):.1f}T" if t_value else "0T"
         pnl_sign = "+" if cumulative_pnl >= 0 else ""
 
+        start_date = cycle.get("start_date") or "-"
+
         message = (
             f"📝 *[무매사이클 #{cycle_seq}] 매매 주문 내역*\n\n"
             f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
             f"▶ 종목: *{ticker} ({method_ver})*\n"
             f"▶ 원금: ${principal:,.0f} | {split_count}분할 | 1회매수금: ${per_buy_val:,.0f}\n"
+            f"▶ 시작일: {start_date}\n"
             f"▶ 보유수량: {balance_from_hts}주 | 진행률: {progress_rate} ({t_display}){quarter_progress}\n"
             f"▶ 현재가: ${current_price} | 평단가: ${average_price}\n"
             f"▶ 평가손익: ${profit} ({profit_rate_pct}%)\n"
