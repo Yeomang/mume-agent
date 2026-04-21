@@ -512,6 +512,10 @@ def hts_orders_from_supabase(
             else:
                 df_order_history = df_order_history.sort_values(by='주문시간').reset_index(drop=True)
                 df_order_history_filtered = df_order_history[df_order_history['종목코드'] == ticker]
+                # 가격 내림차순 정렬
+                df_order_history_filtered = df_order_history_filtered.copy()
+                df_order_history_filtered['_price'] = df_order_history_filtered['주문가'].apply(lambda x: float(str(x).replace(',', '')) if x else 0)
+                df_order_history_filtered = df_order_history_filtered.sort_values(by='_price', ascending=False)
                 order_lines = "\n".join([
                     f"   •  ${float(str(row['주문가']).replace(',', '')):,.2f}  |  "
                     f"{'-' if '매도' in row['매매구분'] else ''}{int(float(str(row['주문량']).replace(',', '')))}주  |  "
@@ -521,15 +525,24 @@ def hts_orders_from_supabase(
         else:
             order_lines = "테스트모드"
 
+        # 추가 정보 계산
+        principal = float(cycle.get("principal") or 0)
+        split_count = int(cycle.get("split_count") or 1)
+        t_value = computed.get("t_value", 0) or 0
+        per_buy_val = computed.get("dynamic_per_buy") or computed.get("repeating_per_buy") or computed.get("per_buy") or (principal / split_count if split_count else 0)
+        cumulative_pnl = computed.get("cumulative_pnl", 0) or 0
+        t_display = f"{float(t_value):.1f}T" if t_value else "0T"
+        pnl_sign = "+" if cumulative_pnl >= 0 else ""
+
         message = (
             f"📝 *[무매사이클 #{cycle_seq}] 매매 주문 내역*\n\n"
             f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
             f"▶ 종목: *{ticker} ({method_ver})*\n"
-            f"▶ 보유수량: {balance_from_hts}주\n"
-            f"▶ 진행률: {progress_rate}{quarter_progress}\n"
-            f"▶ 평가금액: ${eval_amount} | 총매입금액: ${purchase_amount}\n"
+            f"▶ 원금: ${principal:,.0f} | {split_count}분할 | 1회매수금: ${per_buy_val:,.0f}\n"
+            f"▶ 보유수량: {balance_from_hts}주 | 진행률: {progress_rate} ({t_display}){quarter_progress}\n"
             f"▶ 현재가: ${current_price} | 평단가: ${average_price}\n"
-            f"▶ 평가손익 : ${profit} ({profit_rate_pct}%)\n"
+            f"▶ 평가손익: ${profit} ({profit_rate_pct}%)\n"
+            f"▶ 실현손익금: {pnl_sign}${abs(cumulative_pnl):,.2f}\n"
             f"▶ 실제 HTS 주문내역\n"
             f"{order_lines}"
         )

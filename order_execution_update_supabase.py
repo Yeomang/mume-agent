@@ -23,7 +23,7 @@ def _get_active_cycles(sb, selected_user, account_index, auth_user_ids=None, cyc
     uids = auth_user_ids or get_auth_user_ids()
     res = supabase_fetch_all(
         lambda s, e: sb.table("cycle_master")
-        .select("id, cycle_seq, status, method, stock_code, auth_user_id")
+        .select("id, cycle_seq, status, method, stock_code, auth_user_id, principal, split_count")
         .in_("status", ["진행중", "시작전"])
         .in_("auth_user_id", uids)
         .eq("user_name", selected_user)
@@ -212,12 +212,48 @@ def orders_execution_update_supabase(
 
         logging.info(f"[종목코드 '{ticker}' 내역 {len(filtered_df)}건]\n{filtered_df}")
 
-        # 텔레그램 메시지용 주문 내역 포맷
-        formatted_orders = "\n".join([
-            f"   •  ${float(order['주문단가']):,.2f}  |  {int(order['주문수량'])}주  |  {order['주문조건']}  |  "
-            f"{'미체결' if int(order['체결수량']) == 0 else '*${:,.2f}  |  {}주*'.format(float(order['체결단가']), int(order['체결수량']))}"
-            for _, order in filtered_df.iterrows()
-        ])
+        # computed에서 추가 정보 가져오기
+        _computed = {}
+        try:
+            _comp_res = sb.table("cycle_trades_latest").select("computed").eq("cycle_id", cycle_id).execute()
+            if _comp_res.data:
+                _computed = _comp_res.data[0].get("computed") or {}
+        except Exception:
+            pass
+        _principal = float(cycle.get("principal") or 0)
+        _split_count = int(cycle.get("split_count") or 1)
+        _t_value = _computed.get("t_value", 0) or 0
+        _progress_rate = _computed.get("progress_rate", 0) or 0
+        _per_buy = _computed.get("dynamic_per_buy") or _computed.get("repeating_per_buy") or _computed.get("per_buy") or (_principal / _split_count if _split_count else 0)
+        _cumulative_pnl = _computed.get("cumulative_pnl", 0) or 0
+        _avg_price = float(_computed.get("avg_price") or 0)
+        _t_display = f"{float(_t_value):.1f}T" if _t_value else "0T"
+        _progress_display = f"{_progress_rate * 100:.1f}%" if _progress_rate and abs(_progress_rate) <= 1 else f"{_progress_rate:.1f}%"
+        _pnl_sign = "+" if _cumulative_pnl >= 0 else ""
+
+        # 텔레그램 메시지용 주문 내역 포맷 (가격 내림차순)
+        _sorted_df = filtered_df.copy()
+        _sorted_df['_price'] = _sorted_df['주문단가'].apply(lambda x: float(x) if x else 0)
+        _sorted_df = _sorted_df.sort_values(by='_price', ascending=False)
+
+        def _fmt_exec_line(order):
+            price_str = f"${float(order['주문단가']):,.2f}"
+            qty_str = f"{int(order['주문수량'])}주"
+            cond_str = order['주문조건']
+            exec_qty = int(order['체결수량'])
+            if exec_qty == 0:
+                return f"   •  {price_str}  |  {qty_str}  |  {cond_str}  |  미체결"
+            exec_price = float(order['체결단가'])
+            exec_part = f"*${exec_price:,.2f}  |  {exec_qty}주*"
+            # 매도 체결 시 실현손익 표시
+            pnl_part = ""
+            if exec_qty < 0 and _avg_price > 0:
+                sell_pnl = (exec_price - _avg_price) * abs(exec_qty)
+                pnl_emoji = "💰" if sell_pnl >= 0 else "📉"
+                pnl_part = f" {pnl_emoji}{'+' if sell_pnl >= 0 else ''}${sell_pnl:,.0f}"
+            return f"   •  {price_str}  |  {qty_str}  |  {cond_str}  |  {exec_part}{pnl_part}"
+
+        formatted_orders = "\n".join([_fmt_exec_line(order) for _, order in _sorted_df.iterrows()])
 
         # 기존 자동수집 거래 건수 (텔레그램 2차 알림 분기용 — INSERT 전에 미리 조회)
         _prev_trade_count_for_telegram = 0
@@ -252,6 +288,9 @@ def orders_execution_update_supabase(
                 f"💵 *[무매사이클 #{cycle_seq}] 추가 체결 {added_count}건*\n\n"
                 f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
                 f"▶ 종목: *{ticker} ({method_ver})*\n"
+                f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | 1회매수금: ${_per_buy:,.0f}\n"
+                f"▶ 진행률: {_progress_display} ({_t_display})\n"
+                f"▶ 실현손익금: {_pnl_sign}${abs(_cumulative_pnl):,.2f}\n"
                 f"▶ 실제 HTS 체결내역\n"
                 f"{formatted_orders}"
             )
@@ -272,10 +311,11 @@ def orders_execution_update_supabase(
                     f"▶ {inquiry_start_date}~{inquiry_end_date}\n"
                     f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
                     f"▶ 종목: *{ticker} ({method_ver})*\n"
-                    f"▶ 보유수량: {balance_from_hts}주\n"
-                    f"▶ 평가금액: ${eval_amount} | 총매입금액: ${purchase_amount}\n"
+                    f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | 1회매수금: ${_per_buy:,.0f}\n"
+                    f"▶ 보유수량: {balance_from_hts}주 | 진행률: {_progress_display} ({_t_display})\n"
                     f"▶ 현재가: ${current_price} | 평단가: ${average_price}\n"
-                    f"▶ 평가손익 : ${profit} ({profit_rate}%)\n"
+                    f"▶ 평가손익: ${profit} ({profit_rate}%)\n"
+                    f"▶ 실현손익금: {_pnl_sign}${abs(_cumulative_pnl):,.2f}\n"
                     f"▶ 실제 HTS 체결내역\n"
                     f"{formatted_orders}"
                 )
@@ -287,6 +327,9 @@ def orders_execution_update_supabase(
                     f"▶ {inquiry_start_date}~{inquiry_end_date}\n"
                     f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
                     f"▶ 종목: *{ticker} ({method_ver})*\n"
+                    f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | 1회매수금: ${_per_buy:,.0f}\n"
+                    f"▶ 진행률: {_progress_display} ({_t_display})\n"
+                    f"▶ 실현손익금: {_pnl_sign}${abs(_cumulative_pnl):,.2f}\n"
                     f"▶ 현재 해당종목의 잔고 없음\n"
                     f"▶ 실제 HTS 체결내역\n"
                     f"{formatted_orders}"
