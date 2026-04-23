@@ -29,8 +29,9 @@ class Config:
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
     # HTS 설정
-    HTS_EXE_PATH = os.getenv("HTS_EXE_PATH", "")
-    HTS_WINDOW_NAME = os.getenv("HTS_WINDOW_NAME", "iMeritz")
+    _DEFAULT_HTS_EXE_PATH = r"C:\MeritzFire\iMeritz\imeritzmain.exe"
+    HTS_EXE_PATH = os.getenv("HTS_EXE_PATH", "") or _DEFAULT_HTS_EXE_PATH
+    HTS_WINDOW_NAME = os.getenv("HTS_WINDOW_NAME", "") or "iMeritz"
 
     # Supabase 설정
     SUPABASE_URL = os.getenv("SUPABASE_URL", "")
