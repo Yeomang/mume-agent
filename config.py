@@ -46,6 +46,52 @@ class Config:
     AGENT_AUTH_USER_ID = os.getenv("AGENT_AUTH_USER_ID", "")
 
     @classmethod
+    def load_from_console_db(cls):
+        """콘솔 DB(agent_settings)에서 설정을 로드하여 .env 폴백 값을 덮어쓴다.
+        부트스트랩 정보(SUPABASE_*, CONSOLE_URL, HTS_AGENT_KEY)는 .env 고정.
+        """
+        try:
+            from supabase_client import get_supabase_client
+            sb = get_supabase_client()
+            if not sb:
+                return
+
+            # agent_secret으로 자기 계정 역조회
+            agent_key = cls.HTS_AGENT_KEY
+            if not agent_key:
+                return
+
+            res = (
+                sb.table("agent_settings")
+                .select("telegram_bot_token_order, telegram_bot_token_execution, telegram_chat_id, hts_exe_path, hts_window_name, auth_user_id")
+                .eq("agent_secret", agent_key)
+                .limit(1)
+                .execute()
+            )
+            if not res.data:
+                logging.info("[config] 콘솔 DB에서 에이전트 설정을 찾을 수 없음 (agent_secret 불일치). .env 값 사용.")
+                return
+
+            row = res.data[0]
+            # DB 값이 있으면 덮어쓰기, 없으면 .env 값 유지
+            if row.get("telegram_bot_token_order"):
+                cls.TELEGRAM_BOT_TOKEN_ORDER = row["telegram_bot_token_order"]
+            if row.get("telegram_bot_token_execution"):
+                cls.TELEGRAM_BOT_TOKEN_EXECUTION = row["telegram_bot_token_execution"]
+            if row.get("telegram_chat_id"):
+                cls.TELEGRAM_CHAT_ID = row["telegram_chat_id"]
+            if row.get("hts_exe_path"):
+                cls.HTS_EXE_PATH = row["hts_exe_path"]
+            if row.get("hts_window_name"):
+                cls.HTS_WINDOW_NAME = row["hts_window_name"]
+            if row.get("auth_user_id") and not cls.AGENT_AUTH_USER_ID:
+                cls.AGENT_AUTH_USER_ID = row["auth_user_id"]
+
+            logging.info("[config] 콘솔 DB에서 설정 로드 완료 (TG/HTS 설정 동기화)")
+        except Exception as e:
+            logging.warning(f"[config] 콘솔 DB 설정 로드 실패 (무시, .env 폴백): {e}")
+
+    @classmethod
     def validate(cls) -> bool:
         """필수 설정값이 모두 있는지 검증"""
         required_fields = [

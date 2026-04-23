@@ -98,6 +98,11 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 @app.on_event("startup")
 def on_startup():
     _agent_logger.info("═══ HTS Agent 서버 시작 (port 9000) ═══")
+    # 콘솔 DB에서 설정 동기화 (TG 토큰, HTS 경로 등)
+    try:
+        Config.load_from_console_db()
+    except Exception as e:
+        _agent_logger.warning(f"콘솔 DB 설정 로드 실패: {e}")
 
 
 @app.on_event("shutdown")
