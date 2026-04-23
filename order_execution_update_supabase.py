@@ -216,6 +216,15 @@ def orders_execution_update_supabase(
         _split_count = int(cycle.get("split_count") or 1)
         _start_date = cycle.get("start_date") or "-"
 
+        # 매도 손익 계산용 평균단가 사전 조회
+        _pre_avg_price = 0.0
+        try:
+            _pre_comp_res = sb.table("cycle_trades_latest").select("computed").eq("cycle_id", cycle_id).execute()
+            if _pre_comp_res.data:
+                _pre_avg_price = float((_pre_comp_res.data[0].get("computed") or {}).get("avg_price") or 0)
+        except Exception:
+            pass
+
         # 텔레그램 메시지용 주문 내역 포맷 (가격 내림차순)
         _sorted_df = filtered_df.copy()
         _sorted_df['_price'] = _sorted_df['주문단가'].apply(lambda x: float(x) if x else 0)
@@ -232,8 +241,8 @@ def orders_execution_update_supabase(
             exec_part = f"*${exec_price:,.2f}  |  {exec_qty}주*"
             # 매도 체결 시 실현손익 표시
             pnl_part = ""
-            if exec_qty < 0 and _avg_price > 0:
-                sell_pnl = (exec_price - _avg_price) * abs(exec_qty)
+            if exec_qty < 0 and _pre_avg_price > 0:
+                sell_pnl = (exec_price - _pre_avg_price) * abs(exec_qty)
                 pnl_emoji = "💰" if sell_pnl >= 0 else "📉"
                 pnl_part = f" {pnl_emoji}{'+' if sell_pnl >= 0 else ''}${sell_pnl:,.0f}"
             return f"   •  {price_str}  |  {qty_str}  |  {cond_str}  |  {exec_part}{pnl_part}"
@@ -276,14 +285,11 @@ def orders_execution_update_supabase(
             _progress_rate = _computed.get("progress_rate", 0) or 0
             _per_buy = _computed.get("dynamic_per_buy") or _computed.get("repeating_per_buy") or _computed.get("per_buy") or (_principal / _split_count if _split_count else 0)
             _cumulative_pnl = _computed.get("cumulative_pnl", 0) or 0
-            _avg_price = float(_computed.get("avg_price") or 0)
+            _comp_avg = float(_computed.get("avg_price") or 0)
             _t_display = f"{float(_t_value):.1f}T" if _t_value else "0T"
             _progress_display = f"{_progress_rate * 100:.1f}%" if _progress_rate and abs(_progress_rate) <= 1 else f"{_progress_rate:.1f}%"
             _pnl_sign = "+" if _cumulative_pnl >= 0 else ""
-            return _computed, _t_display, _progress_display, _per_buy, _cumulative_pnl, _avg_price, _pnl_sign
-
-        # INSERT 전 체결 전 computed (매도 손익 계산용)
-        _, _, _, _, _, _avg_price, _ = _load_computed_for_telegram()
+            return _computed, _t_display, _progress_display, _per_buy, _cumulative_pnl, _comp_avg, _pnl_sign
 
         # 텔레그램 메시지는 INSERT+recompute 후에 전송 (체결 후 computed 사용)
         _telegram_context = {
