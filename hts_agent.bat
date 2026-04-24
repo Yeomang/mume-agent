@@ -9,9 +9,14 @@ set FAIL_COUNT=0
 echo [%date% %time%] HTS Agent start...
 
 REM Kill existing process on port 9000 if any
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr :9000 ^| findstr LISTENING') do (
-    echo [%date% %time%] Port 9000 in use (PID: %%a), killing...
-    taskkill /F /PID %%a >nul 2>&1
+netstat -ano 2>nul | findstr ":9000.*LISTENING" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [%date% %time%] Port 9000 in use, attempting to free...
+    for /f "tokens=5 delims= " %%a in ('netstat -ano 2^>nul ^| findstr ":9000.*LISTENING"') do (
+        if not "%%a"=="" if not "%%a"=="0" (
+            taskkill /F /PID %%a >nul 2>&1
+        )
+    )
     timeout /t 2 /nobreak >nul
 )
 
