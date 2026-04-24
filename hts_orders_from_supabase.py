@@ -483,13 +483,7 @@ def hts_orders_from_supabase(
 
         if sell_orders and not skip_sell:
             sell_success, sell_err = hts_order_sell(selected_user, account_index, ticker, sell_orders, is_test_mode)
-            if sell_success and not is_test_mode:
-                order_type_label = "limit_sell" if aftermarket_mode else None
-                _record_order_status(cycle_id, [
-                    {"order_type": order_type_label or (o.get("order_type_index", 0) == 0 and "limit_sell" or "loc_sell"),
-                     "side": "sell", "qty": int(o["quantity"]), "price": float(o["price"])}
-                    for o in sell_orders
-                ])
+            # order_status 기록은 CSV 저장 후 실제 HTS 주문내역 기반으로 수행
         elif skip_sell:
             logging.info(">>>>> 매도 주문은 이미 존재하므로 스킵합니다. <<<<<")
         else:
@@ -497,13 +491,7 @@ def hts_orders_from_supabase(
 
         if buy_orders and not skip_buy:
             buy_success, buy_err = hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_index, is_test_mode)
-            if buy_success and not is_test_mode:
-                buy_type = "limit_buy" if aftermarket_mode else "loc_buy"
-                _record_order_status(cycle_id, [
-                    {"order_type": buy_type, "side": "buy",
-                     "qty": int(o["quantity"]), "price": float(o["price"])}
-                    for o in buy_orders if o.get("quantity") and o.get("price")
-                ])
+            # order_status 기록은 CSV 저장 후 실제 HTS 주문내역 기반으로 수행
         elif skip_buy:
             logging.info(">>>>> 매수 주문은 이미 존재하므로 스킵합니다. <<<<<")
         else:
@@ -529,6 +517,28 @@ def hts_orders_from_supabase(
                     f"{'지정가' if row['주문유형'] == '보통' else row['주문유형']}"
                     for _, row in df_order_history_filtered.iterrows()
                 ])
+
+                # [개선] order_status를 HTS 실제 주문내역 CSV 기반으로 기록
+                # 기존: 매도/매수 함수 직후 기록 → HTS에서 실제 접수 안 됐어도 "ordered" 기록
+                # 개선: CSV 저장 후 실제 들어간 건만 기록 → 정확한 상태 반영
+                _csv_orders_for_status = []
+                for _, row in df_order_history_filtered.iterrows():
+                    _side = "sell" if "매도" in row["매매구분"] else "buy"
+                    _otype = row.get("주문유형", "")
+                    if _otype == "보통":
+                        _order_type = "limit_sell" if _side == "sell" else "limit_buy"
+                    elif _otype == "LOC":
+                        _order_type = "loc_sell" if _side == "sell" else "loc_buy"
+                    else:
+                        _order_type = _otype
+                    _csv_orders_for_status.append({
+                        "order_type": _order_type,
+                        "side": _side,
+                        "qty": int(float(str(row["주문량"]).replace(",", ""))),
+                        "price": float(str(row["주문가"]).replace(",", "")),
+                    })
+                if _csv_orders_for_status:
+                    _record_order_status(cycle_id, _csv_orders_for_status)
         else:
             order_lines = "테스트모드"
 
