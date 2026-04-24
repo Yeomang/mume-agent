@@ -113,8 +113,18 @@ def on_shutdown():
 @app.middleware("http")
 async def verify_agent_key(request: Request, call_next):
     # /health는 인증 없이 접근 허용 (연결 테스트, 모니터링용)
-    if AGENT_KEY and request.url.path != "/health" and request.headers.get("X-Agent-Key") != AGENT_KEY:
-        return JSONResponse(status_code=401, content={"detail": "Invalid agent key"})
+    if request.url.path != "/health":
+        if not AGENT_KEY:
+            # [보안] AGENT_KEY 미설정 시 위험 엔드포인트 차단
+            # 키가 설정되지 않은 상태에서 /run, /deploy 등이 무인증으로 열리는 것을 방지
+            return JSONResponse(status_code=401, content={"detail": "HTS_AGENT_KEY가 설정되지 않았습니다."})
+        import hmac
+        incoming = request.headers.get("X-Agent-Key") or ""
+        # [보안] hmac.compare_digest: 타이밍 공격 방지
+        # 일반 != 비교는 문자별 비교 시간 차이로 키 추론이 가능하므로
+        # 항상 일정한 시간이 소요되는 상수 시간 비교 함수를 사용
+        if not hmac.compare_digest(incoming, AGENT_KEY):
+            return JSONResponse(status_code=401, content={"detail": "Invalid agent key"})
     response = await call_next(request)
     # 폴링성 GET 요청은 로깅 제외 (health, monitor, status, logs, processes 등)
     _skip_log = {"/health", "/monitor", "/status", "/logs", "/processes", "/password-status", "/deploy-status"}
@@ -891,6 +901,15 @@ def deploy(payload: dict = Body(...)):
 
     if not release_url:
         raise HTTPException(status_code=400, detail="release_url은 필수입니다.")
+
+    # [보안] 배포 URL 화이트리스트 — github.com/Yeomang 리포지토리에서만 다운로드 허용
+    # 인증키 탈취 시 임의 URL에서 악성 코드를 배포하는 원격 코드 실행(RCE) 공격 방지
+    from urllib.parse import urlparse
+    parsed = urlparse(release_url)
+    allowed_prefixes = ("github.com/yeomang", "github.com/Yeomang", "api.github.com/repos/yeomang", "api.github.com/repos/Yeomang")
+    host_path = f"{parsed.hostname or ''}{parsed.path}".lower()
+    if not any(host_path.startswith(p.lower()) for p in allowed_prefixes):
+        raise HTTPException(status_code=403, detail=f"허용되지 않은 배포 URL입니다: {parsed.hostname}")
 
     # 실행 중인 작업이 있으면 배포 거부
     running_jobs = _check_running_jobs()

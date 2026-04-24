@@ -499,8 +499,11 @@ def copy_to_clipboard(text):
 
 
 def kill_task(task):
+    # [보안] subprocess.run 사용 — os.system(f"...{task}")은 셸을 거쳐 실행되므로
+    # task에 "imeritz.exe & del C:\*" 같은 값이 들어오면 명령 인젝션 가능.
+    # subprocess.run([...])은 셸 없이 직접 실행하여 인젝션 원천 차단.
     logging.info(f"{task} 프로그램을 종료합니다.")
-    os.system(f"TASKKILL /F /IM {task}")
+    subprocess.run(["taskkill", "/F", "/IM", task], capture_output=True, text=True, check=False)
     
 def kill_window_by_title(window_title):
     # 윈도우 핸들 찾기
@@ -512,8 +515,10 @@ def kill_window_by_title(window_title):
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
         
         try:
+            # [보안] subprocess.run 사용 — os.system(f"wmic ... {pid}")은 셸 인젝션에 취약
             logging.info(f'프로세스 {pid} 강제 종료 시도 (WMIC 사용)')
-            os.system(f'wmic process where ProcessId={pid} delete')
+            subprocess.run(["wmic", "process", "where", f"ProcessId={pid}", "delete"],
+                           capture_output=True, text=True, check=False)
             logging.info(f'프로세스 {pid} 강제 종료 완료')
         except Exception as e:
             logging.error(f'프로세스 {pid} 강제 종료 실패: {e}')
