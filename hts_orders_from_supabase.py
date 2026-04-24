@@ -454,31 +454,34 @@ def hts_orders_from_supabase(
                 sell_orders, buy_orders, ticker
             )
 
-        # 중복 주문 방지: order_status에 당일 주문 기록이 있으면 스킵
+        # 중복 주문 방지: HTS 실제 주문내역 CSV 기반으로 판단
+        # 기존 order_status DB 체크는 매도만 성공하고 매수 실패 시에도 스킵하는 문제가 있었음.
+        # 개선: HTS CSV에서 해당 종목의 당일 매도/매수 존재 여부를 각각 확인하여
+        # 이미 들어간 쪽만 스킵하고, 누락된 쪽은 실행.
+        skip_sell = False
+        skip_buy = False
         if not is_test_mode:
             try:
-                from zoneinfo import ZoneInfo
-                from datetime import datetime as _dt
-                today_et = _dt.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
-                console_url = Config.CONSOLE_URL.rstrip("/") if Config.CONSOLE_URL else ""
-                agent_key = Config.HTS_AGENT_KEY
-                if console_url:
-                    headers = {"X-Agent-Key": agent_key} if agent_key else {}
-                    check_res = httpx.get(
-                        f"{console_url}/api/order-status/check",
-                        params={"cycle_id": cycle_id, "order_date": today_et},
-                        headers=headers,
-                        timeout=5.0,
-                    )
-                    if check_res.status_code == 200:
-                        check_data = check_res.json()
-                        if check_data.get("has_orders"):
-                            logging.info(f"[중복방지] 사이클 #{cycle_seq}의 당일({today_et}) 주문이 이미 존재합니다. 스킵합니다.")
+                csv_path = f'./data/order_history_processed/order_history_processed_{selected_user}_{account_index}.csv'
+                _csv_df = load_csv_if_exists(csv_path)
+                if _csv_df is not None and not _csv_df.empty:
+                    _ticker_df = _csv_df[_csv_df['종목코드'] == ticker]
+                    if not _ticker_df.empty:
+                        _has_sell = len(_ticker_df[_ticker_df['매매구분'].str.contains('매도', na=False)]) > 0
+                        _has_buy = len(_ticker_df[_ticker_df['매매구분'].str.contains('매수', na=False)]) > 0
+                        if _has_sell and _has_buy:
+                            logging.info(f"[중복방지] 사이클 #{cycle_seq}: HTS 주문내역에 매도+매수 모두 존재. 전체 스킵.")
                             continue
+                        if _has_sell:
+                            logging.info(f"[중복방지] 사이클 #{cycle_seq}: HTS 주문내역에 매도만 존재. 매도 스킵, 매수만 실행.")
+                            skip_sell = True
+                        if _has_buy:
+                            logging.info(f"[중복방지] 사이클 #{cycle_seq}: HTS 주문내역에 매수만 존재. 매수 스킵, 매도만 실행.")
+                            skip_buy = True
             except Exception as e:
-                logging.warning(f"[중복방지] order_status 확인 실패 (무시하고 진행): {e}")
+                logging.warning(f"[중복방지] HTS 주문내역 확인 실패 (무시하고 진행): {e}")
 
-        if sell_orders:
+        if sell_orders and not skip_sell:
             sell_success, sell_err = hts_order_sell(selected_user, account_index, ticker, sell_orders, is_test_mode)
             if sell_success and not is_test_mode:
                 order_type_label = "limit_sell" if aftermarket_mode else None
@@ -487,10 +490,12 @@ def hts_orders_from_supabase(
                      "side": "sell", "qty": int(o["quantity"]), "price": float(o["price"])}
                     for o in sell_orders
                 ])
+        elif skip_sell:
+            logging.info(">>>>> 매도 주문은 이미 존재하므로 스킵합니다. <<<<<")
         else:
             logging.info(">>>>> 매도할 데이터가 없으므로 주문을 SKIP합니다. <<<<<")
 
-        if buy_orders:
+        if buy_orders and not skip_buy:
             buy_success, buy_err = hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_index, is_test_mode)
             if buy_success and not is_test_mode:
                 buy_type = "limit_buy" if aftermarket_mode else "loc_buy"
@@ -499,6 +504,8 @@ def hts_orders_from_supabase(
                      "qty": int(o["quantity"]), "price": float(o["price"])}
                     for o in buy_orders if o.get("quantity") and o.get("price")
                 ])
+        elif skip_buy:
+            logging.info(">>>>> 매수 주문은 이미 존재하므로 스킵합니다. <<<<<")
         else:
             logging.info(">>>>> 매수할 데이터가 없으므로 주문을 SKIP합니다. <<<<<")
 
