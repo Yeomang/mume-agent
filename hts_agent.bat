@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul 2>&1
 cd /d "C:\mume-agent"
 call "C:\mume-agent\.venv\Scripts\activate.bat"
 
@@ -7,28 +8,26 @@ set FAIL_COUNT=0
 :loop
 echo [%date% %time%] HTS Agent start...
 
-REM 포트 9000을 점유 중인 기존 프로세스가 있으면 자동 종료
+REM Kill existing process on port 9000 if any
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr :9000 ^| findstr LISTENING') do (
-    echo [%date% %time%] 포트 9000 점유 프로세스 발견 (PID: %%a), 종료 시도...
+    echo [%date% %time%] Port 9000 in use (PID: %%a), killing...
     taskkill /F /PID %%a >nul 2>&1
     timeout /t 2 /nobreak >nul
 )
 
 python -m uvicorn hts_agent:app --host 0.0.0.0 --port 9000 --no-use-colors --no-access-log
 
-REM 종료 코드 확인 — 정상 종료(배포 재시작 등)면 카운터 리셋
 if %errorlevel% equ 0 (
     set FAIL_COUNT=0
 ) else (
     set /a FAIL_COUNT+=1
 )
 
-REM 연속 5회 실패 시 무한 루프 방지 — 사용자에게 알리고 대기
 if %FAIL_COUNT% geq 5 (
     echo.
-    echo [%date% %time%] 에이전트가 연속 5회 시작 실패했습니다.
-    echo 포트 충돌, 설정 오류 등을 확인해주세요.
-    echo 아무 키나 누르면 다시 시도합니다...
+    echo [%date% %time%] Agent failed to start 5 times in a row.
+    echo Check for port conflicts or config errors.
+    echo Press any key to retry...
     set FAIL_COUNT=0
     pause >nul
 )
