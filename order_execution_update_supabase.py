@@ -178,6 +178,14 @@ def orders_execution_update_supabase(
     active_cycles = _get_active_cycles(sb, selected_user, account_index, cycles=cycles)
     logging.info(f"| 사용자 '{selected_user}' | HTS계좌순번 '{account_index}' | 활성 사이클: {[c['cycle_seq'] for c in active_cycles]}")
 
+    # "시작전" 사이클은 체결 수집 대상에서 제외
+    # 자동 재시작으로 생성된 새 사이클은 "시작전" 상태이며, 동일 ticker를 가짐.
+    # 이전 사이클의 체결 내역이 새 사이클에 중복 INSERT되는 것을 방지.
+    active_cycles = [c for c in active_cycles if c.get("status") != "시작전"]
+    if not active_cycles:
+        logging.info("체결 수집 대상 사이클 없음 (시작전 사이클 제외)")
+        return
+
     for iternum, cycle in enumerate(active_cycles, start=1):
         cycle_id = cycle["id"]
         cycle_seq = cycle["cycle_seq"]
