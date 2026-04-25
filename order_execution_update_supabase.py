@@ -328,18 +328,27 @@ def orders_execution_update_supabase(
             logging.info("주문내역 중 해당 사이클 종목의 체결내역이 없습니다.")
 
         # Supabase cycle_trades에 체결내역 동기화 + recompute
-        # [재발방지] 기존 데이터와 동일하면 DELETE+INSERT+recompute를 스킵.
-        # 이전 문제: 2차 morning이 동일 데이터를 DELETE→INSERT 후 recompute 실패 시
-        # 1차에서 성공했던 computed가 날아가는 문제 발생.
+        # [안전장치] 트랜잭션 롤백 패턴:
+        #   1. 기존 데이터와 동일하면 전체 스킵 (불필요한 위험 제거)
+        #   2. 변경 시: 기존 데이터 스냅샷 → DELETE → INSERT → recompute
+        #   3. recompute 또는 INSERT 실패 시: 스냅샷으로 롤백 (기존 상태 복원)
         if not is_test_mode:
-            # 기존 자동수집 거래 조회
+            # 기존 자동수집 거래 조회 (스냅샷 + 비교용)
             prev_trade_count = 0
-            prev_trades = []
+            prev_trades = []  # 비교용 (id, price, qty)
+            prev_snapshot = []  # 롤백용 (전체 데이터)
             if trade_date:
                 try:
-                    prev_res = sb.table("cycle_trades").select("id, execution_price, execution_qty", count="exact").eq("cycle_id", cycle_id).eq("trade_date", trade_date).eq("event_type", "TRADE").execute()
+                    prev_res = sb.table("cycle_trades").select("id, cycle_id, trade_date, execution_price, execution_qty, event_type", count="exact").eq("cycle_id", cycle_id).eq("trade_date", trade_date).eq("event_type", "TRADE").execute()
                     prev_trade_count = prev_res.count if prev_res.count is not None else len(prev_res.data or [])
                     prev_trades = prev_res.data or []
+                    # 롤백용 스냅샷 (id 제외, INSERT 가능한 형태)
+                    prev_snapshot = [
+                        {"cycle_id": t["cycle_id"], "trade_date": t["trade_date"],
+                         "execution_price": float(t["execution_price"]), "execution_qty": int(t["execution_qty"]),
+                         "event_type": t["event_type"]}
+                        for t in prev_trades
+                    ]
                 except Exception:
                     pass
 
@@ -365,29 +374,54 @@ def orders_execution_update_supabase(
                 new_set = {(round(r["execution_price"], 2), r["execution_qty"]) for r in rows_to_insert}
                 if prev_set == new_set:
                     data_changed = False
-                    logging.info(f"[중복방지] 사이클 #{cycle_seq}: 기존 체결 데이터와 동일 ({prev_trade_count}건). DELETE+INSERT+recompute 스킵.")
+                    logging.info(f"[중복방지] 사이클 #{cycle_seq}: 기존 체결 데이터와 동일 ({prev_trade_count}건). 스킵.")
 
             new_trade_count = 0
-            if data_changed:
-                # 기존 자동수집 거래 삭제 (MANUAL은 보존)
+            if data_changed and rows_to_insert:
+                # DELETE → INSERT → recompute (실패 시 롤백)
+                deleted_ok = False
+                inserted_ok = False
+                recompute_ok = False
+
+                # Step 1: DELETE
                 if trade_date and prev_trade_count > 0:
                     try:
                         sb.table("cycle_trades").delete().eq("cycle_id", cycle_id).eq("trade_date", trade_date).eq("event_type", "TRADE").execute()
+                        deleted_ok = True
                         logging.info(f"기존 자동수집 거래 {prev_trade_count}건 삭제 (cycle_id={cycle_id}, date={trade_date})")
                     except Exception as e:
                         logging.error(f"기존 거래 삭제 실패: {e}")
+                else:
+                    deleted_ok = True  # 삭제할 것이 없는 경우
 
-                # 체결 건 INSERT
-                if rows_to_insert:
+                # Step 2: INSERT
+                if deleted_ok:
                     try:
                         sb.table("cycle_trades").insert(rows_to_insert).execute()
+                        inserted_ok = True
                         new_trade_count = len(rows_to_insert)
                         logging.info(f"{new_trade_count}건의 체결내역을 cycle_trades에 INSERT 완료!")
                     except Exception as e:
                         logging.error(f"cycle_trades INSERT 실패: {e}")
 
-                    # recompute 트리거
-                    _trigger_recompute(cycle_id)
+                # Step 3: recompute
+                if inserted_ok:
+                    recompute_ok = _trigger_recompute(cycle_id)
+
+                # 롤백: INSERT 또는 recompute 실패 시 기존 데이터 복원
+                if deleted_ok and (not inserted_ok or not recompute_ok) and prev_snapshot:
+                    logging.warning(f"[롤백] 사이클 #{cycle_seq}: {'INSERT' if not inserted_ok else 'recompute'} 실패. 기존 데이터 {len(prev_snapshot)}건 복원 시도.")
+                    try:
+                        # 새로 INSERT된 데이터 삭제
+                        if inserted_ok:
+                            sb.table("cycle_trades").delete().eq("cycle_id", cycle_id).eq("trade_date", trade_date).eq("event_type", "TRADE").execute()
+                        # 스냅샷 복원
+                        sb.table("cycle_trades").insert(prev_snapshot).execute()
+                        logging.info(f"[롤백] 기존 데이터 {len(prev_snapshot)}건 복원 완료. recompute 재시도.")
+                        # 복원 후 recompute 재시도
+                        _trigger_recompute(cycle_id)
+                    except Exception as re:
+                        logging.error(f"[롤백] 복원 실패: {re}. 수동 확인 필요.")
 
             # order_status 동기화 (전체 주문내역 기준: 체결 + 미체결)
             _sync_order_status(sb, cycle_id, cycle.get("auth_user_id", ""), filtered_df, trade_date)
