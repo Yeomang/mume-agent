@@ -327,29 +327,25 @@ def orders_execution_update_supabase(
         else:
             logging.info("주문내역 중 해당 사이클 종목의 체결내역이 없습니다.")
 
-        # Supabase cycle_trades에 삭제 후 재입력 + order_status 동기화
+        # Supabase cycle_trades에 체결내역 동기화 + recompute
+        # [재발방지] 기존 데이터와 동일하면 DELETE+INSERT+recompute를 스킵.
+        # 이전 문제: 2차 morning이 동일 데이터를 DELETE→INSERT 후 recompute 실패 시
+        # 1차에서 성공했던 computed가 날아가는 문제 발생.
         if not is_test_mode:
-            # 기존 자동수집 거래(TRADE) 건수 조회 (텔레그램 알림 분기용)
+            # 기존 자동수집 거래 조회
             prev_trade_count = 0
+            prev_trades = []
             if trade_date:
                 try:
-                    prev_res = sb.table("cycle_trades").select("id", count="exact").eq("cycle_id", cycle_id).eq("trade_date", trade_date).eq("event_type", "TRADE").execute()
+                    prev_res = sb.table("cycle_trades").select("id, execution_price, execution_qty", count="exact").eq("cycle_id", cycle_id).eq("trade_date", trade_date).eq("event_type", "TRADE").execute()
                     prev_trade_count = prev_res.count if prev_res.count is not None else len(prev_res.data or [])
+                    prev_trades = prev_res.data or []
                 except Exception:
                     pass
 
-            # 기존 자동수집 거래 삭제 (MANUAL은 보존)
-            if trade_date and prev_trade_count > 0:
-                try:
-                    sb.table("cycle_trades").delete().eq("cycle_id", cycle_id).eq("trade_date", trade_date).eq("event_type", "TRADE").execute()
-                    logging.info(f"기존 자동수집 거래 {prev_trade_count}건 삭제 (cycle_id={cycle_id}, date={trade_date})")
-                except Exception as e:
-                    logging.error(f"기존 거래 삭제 실패: {e}")
-
-            # 체결 건 INSERT
-            new_trade_count = 0
+            # 새로 INSERT할 체결 건 준비
+            rows_to_insert = []
             if not only_executed_df.empty:
-                rows_to_insert = []
                 for _, row in only_executed_df.iterrows():
                     td = None
                     if not pd.isnull(row['주문일자']):
@@ -362,15 +358,36 @@ def orders_execution_update_supabase(
                         "event_type": "TRADE",
                     })
 
-                try:
-                    sb.table("cycle_trades").insert(rows_to_insert).execute()
-                    new_trade_count = len(rows_to_insert)
-                    logging.info(f"{new_trade_count}건의 체결내역을 cycle_trades에 INSERT 완료!")
-                except Exception as e:
-                    logging.error(f"cycle_trades INSERT 실패: {e}")
+            # 기존 데이터와 동일한지 비교 (건수 + 각 건의 가격/수량)
+            data_changed = True
+            if prev_trade_count == len(rows_to_insert) and prev_trade_count > 0:
+                prev_set = {(round(float(t.get("execution_price", 0)), 2), int(t.get("execution_qty", 0))) for t in prev_trades}
+                new_set = {(round(r["execution_price"], 2), r["execution_qty"]) for r in rows_to_insert}
+                if prev_set == new_set:
+                    data_changed = False
+                    logging.info(f"[중복방지] 사이클 #{cycle_seq}: 기존 체결 데이터와 동일 ({prev_trade_count}건). DELETE+INSERT+recompute 스킵.")
 
-                # recompute 트리거
-                _trigger_recompute(cycle_id)
+            new_trade_count = 0
+            if data_changed:
+                # 기존 자동수집 거래 삭제 (MANUAL은 보존)
+                if trade_date and prev_trade_count > 0:
+                    try:
+                        sb.table("cycle_trades").delete().eq("cycle_id", cycle_id).eq("trade_date", trade_date).eq("event_type", "TRADE").execute()
+                        logging.info(f"기존 자동수집 거래 {prev_trade_count}건 삭제 (cycle_id={cycle_id}, date={trade_date})")
+                    except Exception as e:
+                        logging.error(f"기존 거래 삭제 실패: {e}")
+
+                # 체결 건 INSERT
+                if rows_to_insert:
+                    try:
+                        sb.table("cycle_trades").insert(rows_to_insert).execute()
+                        new_trade_count = len(rows_to_insert)
+                        logging.info(f"{new_trade_count}건의 체결내역을 cycle_trades에 INSERT 완료!")
+                    except Exception as e:
+                        logging.error(f"cycle_trades INSERT 실패: {e}")
+
+                    # recompute 트리거
+                    _trigger_recompute(cycle_id)
 
             # order_status 동기화 (전체 주문내역 기준: 체결 + 미체결)
             _sync_order_status(sb, cycle_id, cycle.get("auth_user_id", ""), filtered_df, trade_date)
