@@ -40,30 +40,39 @@ def _get_active_cycles(sb, selected_user, account_index, auth_user_ids=None, cyc
 
 
 def _trigger_recompute(cycle_id: int):
-    """콘솔 API를 호출하여 recompute를 트리거한다."""
+    """콘솔 API를 호출하여 recompute를 트리거한다. 실패 시 1회 재시도."""
+    import time as _time
     console_url = Config.CONSOLE_URL.rstrip("/")
     agent_key = Config.HTS_AGENT_KEY
     if not console_url:
         logging.warning("[recompute] CONSOLE_URL이 설정되지 않아 recompute를 트리거할 수 없습니다.")
         return False
     headers = {"X-Agent-Key": agent_key} if agent_key else {}
-    try:
-        resp = httpx.post(
-            f"{console_url}/recompute/{cycle_id}",
-            headers=headers,
-            timeout=60.0,
-        )
-        resp.raise_for_status()
-        logging.info(f"[recompute] 사이클 {cycle_id} recompute 완료")
-        return True
-    except httpx.ConnectError:
-        logging.warning(f"[recompute] 콘솔({console_url})에 연결할 수 없습니다.")
-        return False
-    except httpx.HTTPStatusError as e:
-        logging.warning(f"[recompute] 사이클 {cycle_id} recompute 실패: {e.response.status_code} {e.response.text}")
-        return False
-    except Exception as e:
-        logging.warning(f"[recompute] 사이클 {cycle_id} recompute 예외: {e}")
+    for attempt in range(2):
+        try:
+            resp = httpx.post(
+                f"{console_url}/recompute/{cycle_id}",
+                headers=headers,
+                timeout=60.0,
+            )
+            resp.raise_for_status()
+            logging.info(f"[recompute] 사이클 {cycle_id} recompute 완료")
+            return True
+        except httpx.ConnectError:
+            logging.warning(f"[recompute] 콘솔({console_url})에 연결할 수 없습니다.")
+            if attempt == 0:
+                _time.sleep(3)
+                continue
+            return False
+        except httpx.HTTPStatusError as e:
+            logging.warning(f"[recompute] 사이클 {cycle_id} recompute 실패 (시도 {attempt+1}/2): {e.response.status_code} {e.response.text}")
+            if attempt == 0:
+                _time.sleep(3)
+                continue
+            return False
+        except Exception as e:
+            logging.warning(f"[recompute] 사이클 {cycle_id} recompute 예외: {e}")
+            return False
         return False
 
 
