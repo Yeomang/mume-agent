@@ -463,7 +463,20 @@ def hts_orders_from_supabase(
         if not is_test_mode:
             try:
                 csv_path = f'./data/order_history_processed/order_history_processed_{selected_user}_{account_index}.csv'
-                _csv_df = load_csv_if_exists(csv_path)
+                _csv_df = None
+                # CSV 파일의 수정 시각이 오늘(ET 기준)인지 확인
+                # 이전 거래일의 CSV가 남아있으면 오늘 주문으로 오인하는 버그 방지
+                import os as _os
+                if _os.path.exists(csv_path):
+                    from zoneinfo import ZoneInfo
+                    from datetime import datetime as _dt
+                    _mtime = _os.path.getmtime(csv_path)
+                    _mtime_et = _dt.fromtimestamp(_mtime, tz=ZoneInfo("America/New_York"))
+                    _today_et = _dt.now(ZoneInfo("America/New_York"))
+                    if _mtime_et.date() == _today_et.date():
+                        _csv_df = load_csv_if_exists(csv_path)
+                    else:
+                        logging.info(f"[중복방지] 주문내역 CSV가 이전 거래일({_mtime_et.date()}) 것이므로 무시. 오늘({_today_et.date()}) 기준으로 새로 실행.")
                 if _csv_df is not None and not _csv_df.empty:
                     _ticker_df = _csv_df[_csv_df['종목코드'] == ticker]
                     if not _ticker_df.empty:
