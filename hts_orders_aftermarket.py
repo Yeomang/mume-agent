@@ -133,103 +133,98 @@ def hts_orders_aftermarket(
         logging.info(f"종목코드 '{ticker}'에 해당하는 {len(filtered_df)}건의 데이터가 필터링되었습니다.")
         logging.info(f"[종목코드 '{ticker}' 내역 {len(filtered_df)}건]\n{filtered_df}")
 
-        loc_sell_df = filtered_df[(filtered_df['주문구분'] == '매도') & (filtered_df['주문조건'] == 'LOC')]
-        total_loc_sell_qty = loc_sell_df['체결수량'].sum()
+        # 체결 건수 확인 (매도+매수 전체)
+        total_executed_qty = filtered_df['체결수량'].abs().sum()
 
-        buy_df = filtered_df[(filtered_df['주문구분'] == '매수')]
-        total_buy_qty = buy_df['체결수량'].sum()
-
-        if total_loc_sell_qty == 0:
-            has_rejection = filtered_df['주문상태'].str.contains("거부", na=False).any()
-            if (total_buy_qty == 0) or (has_rejection):
-                buy_df = filtered_df[filtered_df['주문구분'] == '매수']
-                executed_amount = round((buy_df['체결수량'] * buy_df['체결단가']).sum(), 2)
-                logging.info(f"정규장 매수 체결금액 : {executed_amount}")
-
-                remaining_daily_buy_amount = round(daily_buy_amount - executed_amount, 2)
-                logging.info(f"잔여매수금액 (1회매수금액 - 정규장 매수 체결금액) : {remaining_daily_buy_amount}")
-
-                yfticker = yf.Ticker(ticker)
-                info = yfticker.info
-
-                aftermarket_price = info.get("postMarketPrice") or info.get("regularMarketPrice")
-                if aftermarket_price is None:
-                    logging.info(f"'{ticker}'의 Aftermarket 가격 정보를 가져올 수 없습니다. 추가 주문을 건너뜁니다.")
-                    continue
-
-                aftermarket_price = round(aftermarket_price, 2)
-                logging.info(f"'{ticker}' Aftermarket 현재가 : {aftermarket_price}")
-
-                buy_price = round(aftermarket_price * 1.03, 2)
-                logging.info(f"추가주문 매수가(현재가+3%) : {buy_price}")
-
-                buy_quantity = int(remaining_daily_buy_amount / buy_price)
-                logging.info(f"추가주문 매수개수 : {buy_quantity}")
-
-                buy_orders = [
-                    {"quantity": buy_quantity, "price": buy_price}
-                ]
-
-                order_type_index = 0  # 보통(지정가)
-
-                buy_orders = [
-                    order for order in buy_orders
-                    if str(order["quantity"]).strip() not in ["", "0", 0, "None"]
-                    and str(order["price"]).strip() not in ["", "0", 0, "None"]
-                ]
-
-                if buy_orders:
-                    order_buy_success, order_buy_error = hts_order_buy(
-                        selected_user,
-                        account_index,
-                        ticker,
-                        buy_orders,
-                        order_type_index,
-                        is_test_mode,
-                    )
-                    if order_buy_success and not is_test_mode:
-                        _record_order_status(cycle_id, [
-                            {"order_type": "aftermarket_buy", "side": "buy",
-                             "qty": int(o["quantity"]), "price": float(o["price"])}
-                            for o in buy_orders if o.get("quantity") and o.get("price")
-                        ])
-                    if order_buy_success:
-                        formatted_orders = "\n".join([
-                            f"   •  ${float(order['price']):,.2f}  |  {order['quantity']}주  |  보통(지정가)"
-                            for order in buy_orders
-                        ])
-                        message = (
-                            f"📈 *[무매사이클 #{cycle_seq}] Aftermarket 매수 주문 완료*\n\n"
-                            f"▶ 계좌: {selected_user} | 메리츠 | {account_index}번째 계좌\n"
-                            f"▶ 종목: {ticker} ({method_ver})\n"
-                            f"▶ 1회매수금액 : ${daily_buy_amount}\n"
-                            f"▶ 정규장 매수 체결금액 : ${executed_amount}\n"
-                            f"▶ 잔여매수금액 : *${remaining_daily_buy_amount}*\n"
-                            f"▶ 추가주문내역\n"
-                            f"*{formatted_orders}*"
-                        )
-                        send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message)
-                    else:
-                        message = (
-                            f"📉 *[무매사이클 #{cycle_seq}] Aftermarket 매수 주문 실패❌*\n\n"
-                            f"▶ 계좌: {selected_user} | 메리츠 | {account_index}번째 계좌\n"
-                            f"▶ 종목: {ticker} ({method_ver})\n"
-                            f"▶ 1회매수금액 : ${daily_buy_amount}\n"
-                            f"▶ 정규장 매수 체결금액 : ${executed_amount}\n"
-                            f"▶ 잔여매수금액 : *${remaining_daily_buy_amount}*\n"
-                            f"▶ Aftermarket 현재가 : *${aftermarket_price}*\n"
-                            f"▶ 에러내역\n"
-                            f"*{order_buy_error}*"
-                        )
-                        send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message)
-                else:
-                    logging.info(">>>>> Aftermarket에서 추가매수할 데이터가 없으므로 주문을 SKIP합니다. <<<<<")
-            else:
-                logging.info(">>>>> 정규장에서 주문거부되거나 매수주문 전량 미체결되지 않았으므로 Aftermarket 추가매수 주문을 SKIP합니다. <<<<<")
-                continue
-        else:
-            logging.info(">>>>> 정규장에서 LOC 매도가 이루어졌으므로 Aftermarket 추가매수 주문을 SKIP합니다. <<<<<")
+        if total_executed_qty > 0:
+            logging.info(f"[aftermarket] 사이클 #{cycle_seq}: 체결 {int(total_executed_qty)}건 있음. 추가 주문 불필요. 스킵.")
             continue
+        else:
+            # 매도/매수 아무것도 체결 안 됨 → aftermarket 보충 주문 발동
+            # (evening 주문 거부/에러로 누락됐거나, 가격 포지션 문제로 전량 미체결)
+            logging.info(f"[aftermarket] 사이클 #{cycle_seq}: 체결 건수 0 → 추가 매수 주문 실행")
+            buy_df = filtered_df[filtered_df['주문구분'] == '매수']
+            executed_amount = round((buy_df['체결수량'] * buy_df['체결단가']).sum(), 2)
+            logging.info(f"정규장 매수 체결금액 : {executed_amount}")
+
+            remaining_daily_buy_amount = round(daily_buy_amount - executed_amount, 2)
+            logging.info(f"잔여매수금액 (1회매수금액 - 정규장 매수 체결금액) : {remaining_daily_buy_amount}")
+
+            yfticker = yf.Ticker(ticker)
+            info = yfticker.info
+
+            aftermarket_price = info.get("postMarketPrice") or info.get("regularMarketPrice")
+            if aftermarket_price is None:
+                logging.info(f"'{ticker}'의 Aftermarket 가격 정보를 가져올 수 없습니다. 추가 주문을 건너뜁니다.")
+                continue
+
+            aftermarket_price = round(aftermarket_price, 2)
+            logging.info(f"'{ticker}' Aftermarket 현재가 : {aftermarket_price}")
+
+            buy_price = round(aftermarket_price * 1.03, 2)
+            logging.info(f"추가주문 매수가(현재가+3%) : {buy_price}")
+
+            buy_quantity = int(remaining_daily_buy_amount / buy_price)
+            logging.info(f"추가주문 매수개수 : {buy_quantity}")
+
+            buy_orders = [
+                {"quantity": buy_quantity, "price": buy_price}
+            ]
+
+            order_type_index = 0  # 보통(지정가)
+
+            buy_orders = [
+                order for order in buy_orders
+                if str(order["quantity"]).strip() not in ["", "0", 0, "None"]
+                and str(order["price"]).strip() not in ["", "0", 0, "None"]
+            ]
+
+            if buy_orders:
+                order_buy_success, order_buy_error = hts_order_buy(
+                    selected_user,
+                    account_index,
+                    ticker,
+                    buy_orders,
+                    order_type_index,
+                    is_test_mode,
+                )
+                if order_buy_success and not is_test_mode:
+                    _record_order_status(cycle_id, [
+                        {"order_type": "aftermarket_buy", "side": "buy",
+                         "qty": int(o["quantity"]), "price": float(o["price"])}
+                        for o in buy_orders if o.get("quantity") and o.get("price")
+                    ])
+                if order_buy_success:
+                    formatted_orders = "\n".join([
+                        f"   •  ${float(order['price']):,.2f}  |  {order['quantity']}주  |  보통(지정가)"
+                        for order in buy_orders
+                    ])
+                    message = (
+                        f"📈 *[무매사이클 #{cycle_seq}] Aftermarket 매수 주문 완료*\n\n"
+                        f"▶ 계좌: {selected_user} | 메리츠 | {account_index}번째 계좌\n"
+                        f"▶ 종목: {ticker} ({method_ver})\n"
+                        f"▶ 1회매수금액 : ${daily_buy_amount}\n"
+                        f"▶ 정규장 매수 체결금액 : ${executed_amount}\n"
+                        f"▶ 잔여매수금액 : *${remaining_daily_buy_amount}*\n"
+                        f"▶ 추가주문내역\n"
+                        f"*{formatted_orders}*"
+                    )
+                    send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message)
+                else:
+                    message = (
+                        f"📉 *[무매사이클 #{cycle_seq}] Aftermarket 매수 주문 실패❌*\n\n"
+                        f"▶ 계좌: {selected_user} | 메리츠 | {account_index}번째 계좌\n"
+                        f"▶ 종목: {ticker} ({method_ver})\n"
+                        f"▶ 1회매수금액 : ${daily_buy_amount}\n"
+                        f"▶ 정규장 매수 체결금액 : ${executed_amount}\n"
+                        f"▶ 잔여매수금액 : *${remaining_daily_buy_amount}*\n"
+                        f"▶ Aftermarket 현재가 : *${aftermarket_price}*\n"
+                        f"▶ 에러내역\n"
+                        f"*{order_buy_error}*"
+                    )
+                    send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message)
+            else:
+                logging.info(">>>>> Aftermarket에서 추가매수할 데이터가 없으므로 주문을 SKIP합니다. <<<<<")
 
 
 if __name__ == "__main__":
