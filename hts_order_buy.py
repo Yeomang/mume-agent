@@ -98,7 +98,7 @@ def hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_i
         # 반복문을 사용해 buy_orders 리스트 내의 모든 주문을 실행
         failed_orders = []
         for order in buy_orders:
-            quantity = order["quantity"]
+            quantity = int(order["quantity"])  # float→int 방어 (1.0→1)
             price = order["price"]
 
             if not quantity or not price:

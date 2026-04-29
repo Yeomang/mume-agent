@@ -88,14 +88,14 @@ def hts_order_sell(selected_user, account_index, ticker, sell_orders, is_test_mo
 
         # 반복문을 사용해 `sell_orders` 리스트 내의 모든 주문을 실행
         for order in sell_orders:
-            quantity = order["quantity"]
+            quantity = int(order["quantity"])  # float→int 방어 (1.0→1)
             price = order["price"]
             order_type_index = order["order_type_index"]
-            
+
             if not quantity or not price:
                 logging.warning(f"유효하지 않은 주문 데이터: {order}")
                 continue  # 값이 없으면 건너뜀
-            
+
             logging.info(f"매도 주문 실행: ${price} | {quantity}주 | 유형: {order_type_index}")
 
             # 매도 유형 선택
