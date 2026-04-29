@@ -435,6 +435,15 @@ def hts_orders_from_supabase(
             and str(order["price"]).strip() not in invalid_values
         ]
 
+        # [중요] quantity를 int로 변환 — float(1.0) 상태로 HTS에 입력하면
+        # "1.0" → "10"으로 잘못 입력되는 문제 방지
+        for o in sell_orders:
+            if o.get("quantity") is not None:
+                o["quantity"] = int(o["quantity"])
+        for o in buy_orders:
+            if o.get("quantity") is not None:
+                o["quantity"] = int(o["quantity"])
+
         # 장 마감 후 실행 시: LOC/MOC → 지정가 전환 (애프터마켓 모드)
         aftermarket_mode = is_after_regular_session()
         order_type_index = 3  # LOC (기본)
