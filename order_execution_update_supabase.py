@@ -493,6 +493,20 @@ def orders_execution_update_supabase(
                     f"▶ 현재 해당종목의 잔고 없음\n"
                     f"▶ 실제 HTS 체결내역\n"
                     f"{_ctx['formatted_orders']}")
+        else:
+            # 보유잔고 CSV 로드 실패 시에도 체결 내역은 전송
+            send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+                f"💵 *[무매사이클 #{cycle_seq}] 매매 체결 내역*\n\n"
+                f"▶ {inquiry_start_date}~{inquiry_end_date}\n"
+                f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
+                f"▶ 종목: *{ticker} ({method_ver})*\n"
+                f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | 1회매수금: ${_per_buy:,.0f}\n"
+                f"▶ 시작일: {_start_date}\n"
+                f"▶ 진행률: {_progress_display} ({_t_display})\n"
+                f"▶ 실현손익금: {_pnl_sign}${abs(_cumulative_pnl):,.2f}\n"
+                f"▶ (보유잔고 조회 실패)\n"
+                f"▶ 실제 HTS 체결내역\n"
+                f"{_ctx['formatted_orders']}")
 
         logging.info(f"{cycle_seq}번 사이클 체결내역 업데이트 완료!")
 
