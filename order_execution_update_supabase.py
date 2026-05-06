@@ -23,7 +23,7 @@ def _get_active_cycles(sb, selected_user, account_index, auth_user_ids=None, cyc
     uids = auth_user_ids or get_auth_user_ids()
     res = supabase_fetch_all(
         lambda s, e: sb.table("cycle_master")
-        .select("id, cycle_seq, status, method, stock_code, auth_user_id, principal, split_count, start_date")
+        .select("id, cycle_seq, status, method, stock_code, auth_user_id, principal, split_count, start_date, parent_cycle_id")
         .in_("status", ["진행중", "시작전"])
         .in_("auth_user_id", uids)
         .eq("user_name", selected_user)
@@ -188,13 +188,30 @@ def orders_execution_update_supabase(
     logging.info(f"| 사용자 '{selected_user}' | HTS계좌순번 '{account_index}' | 활성 사이클: {[c['cycle_seq'] for c in active_cycles]}")
 
     # "시작전" 사이클 중복 INSERT 방지:
-    # 같은 종목(ticker)에 "진행중" 사이클과 "시작전" 사이클이 동시에 있으면
-    # 시작전 사이클을 제외 (자동 재시작으로 생성된 중복 사이클 방지).
-    # 단, 시작전 사이클만 있는 경우(첫 매수 체결)는 수집 대상에 포함.
+    # 1) 같은 종목에 "진행중" 사이클이 있으면 시작전 제외
+    # 2) 자동재시작으로 생성된 시작전 사이클(parent_cycle_id 있음)이
+    #    부모 사이클의 체결내역과 같은 조회기간이면 제외
     in_progress_tickers = {c.get("stock_code") for c in active_cycles if c.get("status") == "진행중"}
+    # 부모가 당일 종료된 시작전 사이클 제외
+    _skip_ids = set()
+    for c in active_cycles:
+        if c.get("status") != "시작전" or not c.get("parent_cycle_id"):
+            continue
+        try:
+            parent_res = sb.table("cycle_master").select("end_date, stock_code").eq("id", c["parent_cycle_id"]).limit(1).execute()
+            if parent_res.data:
+                parent_end = parent_res.data[0].get("end_date") or ""
+                # 부모 종료일이 조회 기간에 포함되면 스킵
+                end_yyyymmdd = parent_end.replace("-", "")
+                if end_yyyymmdd and inquiry_start_date <= end_yyyymmdd <= inquiry_end_date:
+                    _skip_ids.add(c["id"])
+                    logging.info(f"[중복방지] 시작전 사이클 #{c['cycle_seq']} 스킵 (부모 #{c['parent_cycle_id']} 종료일 {parent_end}이 조회기간 내)")
+        except Exception:
+            pass
     active_cycles = [
         c for c in active_cycles
-        if c.get("status") != "시작전" or c.get("stock_code") not in in_progress_tickers
+        if c["id"] not in _skip_ids
+        and (c.get("status") != "시작전" or c.get("stock_code") not in in_progress_tickers)
     ]
     if not active_cycles:
         logging.info("체결 수집 대상 사이클 없음")
