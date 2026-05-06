@@ -221,7 +221,16 @@ def _sync_stock_balance_to_db(user: str, account_index: int):
 
         file_path = f'./data/stock_balance_processed/stock_balance_processed_{user}_{account_index}.csv'
         df = load_csv_if_exists(file_path)
-        if df is None or df.empty:
+
+        if df is None:
+            return
+
+        # CSV가 비어있으면 보유종목 없음 → 기존 잔고 레코드 삭제
+        if df.empty:
+            sb.table("account_stock_balance").delete().eq(
+                "auth_user_id", auth_user_id
+            ).eq("user_name", user).eq("account_index", account_index).execute()
+            logging.info(f"[잔고DB] {user}/{account_index} 보유종목 없음 → 기존 잔고 삭제")
             return
 
         def parse_num(v):
@@ -230,10 +239,12 @@ def _sync_stock_balance_to_db(user: str, account_index: int):
             except Exception:
                 return 0.0
 
+        csv_stocks = set()
         for _, row in df.iterrows():
             stock_code = str(row.get("종목코드", "")).strip()
             if not stock_code:
                 continue
+            csv_stocks.add(stock_code)
             record = {
                 "auth_user_id": auth_user_id,
                 "user_name": user,
@@ -252,6 +263,19 @@ def _sync_stock_balance_to_db(user: str, account_index: int):
                 record,
                 on_conflict="auth_user_id,user_name,account_index,stock_code",
             ).execute()
+
+        # CSV에 없는 종목(전량 매도)은 DB에서 삭제
+        existing = sb.table("account_stock_balance").select("stock_code").eq(
+            "auth_user_id", auth_user_id
+        ).eq("user_name", user).eq("account_index", account_index).execute()
+        for r in (existing.data or []):
+            if r["stock_code"] not in csv_stocks:
+                sb.table("account_stock_balance").delete().eq(
+                    "auth_user_id", auth_user_id
+                ).eq("user_name", user).eq("account_index", account_index).eq(
+                    "stock_code", r["stock_code"]
+                ).execute()
+                logging.info(f"[잔고DB] {user}/{account_index} 매도 완료 종목 {r['stock_code']} 삭제")
 
         logging.info(f"[잔고DB] {user}/{account_index} Supabase 동기화 완료")
     except Exception as e:
