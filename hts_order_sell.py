@@ -1,4 +1,4 @@
-from utils import setup_window, find_control_by_criteria, set_focus_and_type, wait_for_window, block_input, _handle_password_dialog, with_desktop_retry
+from utils import setup_window, find_control_by_criteria, set_focus_and_type, wait_for_window, block_input, _handle_password_dialog, send_telegram_message, with_desktop_retry
 from secrets_manager import get_account_password
 from config import Config
 from pywinauto import Application
@@ -87,6 +87,7 @@ def hts_order_sell(selected_user, account_index, ticker, sell_orders, is_test_mo
         logging.info(f"종목 입력 필드에 '{ticker}'를 입력하였습니다.")
 
         # 반복문을 사용해 `sell_orders` 리스트 내의 모든 주문을 실행
+        failed_orders = []
         for order in sell_orders:
             quantity = int(order["quantity"])  # float→int 방어 (1.0→1)
             price = order["price"]
@@ -127,11 +128,51 @@ def hts_order_sell(selected_user, account_index, ticker, sell_orders, is_test_mo
                 if sell_button:
                     sell_button.click_input()
                     logging.info("'실제 모드'이므로 '매도' 버튼을 클릭했습니다.")
-                    
+
+            # 매도 확인 버튼 클릭 후 안내 모달 체크
+            alert_modal = wait_for_window("안내", main_window, "안내", "Window", timeout=1)
+            if alert_modal:
+                alert_text = ""
+                try:
+                    for ctrl in alert_modal.descendants():
+                        if ctrl.element_info.control_type == "Text":
+                            t = ctrl.element_info.name or ""
+                            if t and t != "안내":
+                                alert_text = t
+                                break
+                except Exception:
+                    pass
+                logging.warning(f"주문 실패 ({alert_text}): ${price} x {quantity}주 — 다음 주문으로 계속 진행")
+                failed_orders.append({"quantity": quantity, "price": price, "reason": alert_text})
+                ok_btn = find_control_by_criteria(alert_modal, "Button", automation_id="2", delay=0, silent=True)
+                if not ok_btn:
+                    ok_btn = find_control_by_criteria(alert_modal, "Button", title="확인", delay=0, silent=True)
+                if ok_btn:
+                    ok_btn.click_input()
+                    logging.info("안내 모달의 확인 버튼을 클릭하였습니다.")
+                continue
+
+        # 실패한 주문이 있으면 텔레그램 알림
+        if failed_orders:
+            try:
+                fail_lines = [f"  ${f['price']} x {f['quantity']}주 ({f['reason']})" for f in failed_orders]
+                tg_msg = f"⚠️ [{selected_user} | {account_index}번 계좌] {ticker} 일부 매도 주문 실패\n" + "\n".join(fail_lines)
+                send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, tg_msg)
+            except Exception:
+                pass
+
         order_window.close()
         logging.info("'해외주식 주문' 창을 닫았습니다.")
         logging.info(">>>>> 매도 주문 완료! <<<<<")
-        # 주문 성공 시 True 반환
+
+        if failed_orders:
+            fail_detail = "; ".join(
+                f"${f['price']} x {f['quantity']}주 ({f['reason']})"
+                for f in failed_orders
+            )
+            if len(failed_orders) >= len(sell_orders):
+                return False, fail_detail
+            return True, fail_detail
         return True, ""
     
     except Exception as e:
