@@ -112,9 +112,8 @@ def hts_orders_aftermarket(
             principal = cycle.get("principal", 0)
             split_count = cycle.get("split_count", 10)
             daily_buy_amount = float(principal / split_count) if split_count else 0
-        elif method_ver == "V3.0":
-            # V3.0: computed에서 repeating_per_buy 또는 per_buy 사용
-            daily_buy_amount = float(computed.get("repeating_per_buy") or computed.get("per_buy") or 0)
+        elif method_ver in ("V3.0", "V4.0"):
+            daily_buy_amount = float(computed.get("repeating_per_buy") or computed.get("dynamic_per_buy") or computed.get("per_buy") or 0)
             if daily_buy_amount == 0:
                 principal = cycle.get("principal", 0)
                 split_count = cycle.get("split_count", 10)
