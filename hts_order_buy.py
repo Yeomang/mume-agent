@@ -167,7 +167,10 @@ def hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_i
         order_window.close()
         logging.info("'해외주식 주문' 창을 닫았습니다.")
         logging.info(">>>>> 매수 주문 완료! <<<<<")
-        # 주문 성공 시 True 반환
+
+        if failed_orders and len(failed_orders) >= len(buy_orders):
+            reasons = "; ".join(f["reason"] for f in failed_orders if f.get("reason"))
+            return False, reasons or "전체 주문 실패"
         return True, ""
     
     except Exception as e:
