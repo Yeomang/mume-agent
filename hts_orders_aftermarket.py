@@ -198,6 +198,7 @@ def hts_orders_aftermarket(
                         f"   •  ${float(order['price']):,.2f}  |  {order['quantity']}주  |  보통(지정가)"
                         for order in buy_orders
                     ])
+                    fail_section = f"\n▶ ⚠️ 일부 실패: {order_buy_error}" if order_buy_error else ""
                     message = (
                         f"📈 *[무매사이클 #{cycle_seq}] Aftermarket 매수 주문 완료*\n\n"
                         f"▶ 계좌: {selected_user} | 메리츠 | {account_index}번째 계좌\n"
@@ -207,6 +208,7 @@ def hts_orders_aftermarket(
                         f"▶ 잔여매수금액 : *${remaining_daily_buy_amount}*\n"
                         f"▶ 추가주문내역\n"
                         f"*{formatted_orders}*"
+                        f"{fail_section}"
                     )
                     send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message)
                 else:
