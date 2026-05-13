@@ -40,13 +40,18 @@ def _get_active_cycles(sb, selected_user, account_index, auth_user_ids=None, cyc
 
 
 def _trigger_recompute(cycle_id: int):
-    """콘솔 API를 호출하여 recompute를 트리거한다. 실패 시 1회 재시도."""
+    """콘솔 API를 호출하여 recompute를 트리거한다. 실패 시 1회 재시도.
+
+    Returns:
+        (성공여부, pending_notifications) 튜플.
+        pending_notifications는 체결내역 알림 후 발송할 종료/재시작 알림 목록.
+    """
     import time as _time
     console_url = Config.CONSOLE_URL.rstrip("/")
     agent_key = Config.HTS_AGENT_KEY
     if not console_url:
         logging.warning("[recompute] CONSOLE_URL이 설정되지 않아 recompute를 트리거할 수 없습니다.")
-        return False
+        return False, []
     headers = {"X-Agent-Key": agent_key} if agent_key else {}
     for attempt in range(2):
         try:
@@ -57,23 +62,28 @@ def _trigger_recompute(cycle_id: int):
             )
             resp.raise_for_status()
             logging.info(f"[recompute] 사이클 {cycle_id} recompute 완료")
-            return True
+            pending = []
+            try:
+                pending = resp.json().get("pending_notifications", [])
+            except Exception:
+                pass
+            return True, pending
         except httpx.ConnectError:
             logging.warning(f"[recompute] 콘솔({console_url})에 연결할 수 없습니다.")
             if attempt == 0:
                 _time.sleep(3)
                 continue
-            return False
+            return False, []
         except httpx.HTTPStatusError as e:
             logging.warning(f"[recompute] 사이클 {cycle_id} recompute 실패 (시도 {attempt+1}/2): {e.response.status_code} {e.response.text}")
             if attempt == 0:
                 _time.sleep(3)
                 continue
-            return False
+            return False, []
         except Exception as e:
             logging.warning(f"[recompute] 사이클 {cycle_id} recompute 예외: {e}")
-            return False
-        return False
+            return False, []
+        return False, []
 
 
 def _sync_order_status(sb, cycle_id: int, auth_user_id: str, all_orders_df, trade_date: str):
@@ -354,6 +364,7 @@ def orders_execution_update_supabase(
         #   1. 기존 데이터와 동일하면 전체 스킵 (불필요한 위험 제거)
         #   2. 변경 시: 기존 데이터 스냅샷 → DELETE → INSERT → recompute
         #   3. recompute 또는 INSERT 실패 시: 스냅샷으로 롤백 (기존 상태 복원)
+        _pending_notifs = []
         if not is_test_mode:
             # 기존 자동수집 거래 조회 (스냅샷 + 비교용)
             prev_trade_count = 0
@@ -428,7 +439,7 @@ def orders_execution_update_supabase(
 
                 # Step 3: recompute
                 if inserted_ok:
-                    recompute_ok = _trigger_recompute(cycle_id)
+                    recompute_ok, _pending_notifs = _trigger_recompute(cycle_id)
 
                 # 롤백: INSERT 또는 recompute 실패 시 기존 데이터 복원
                 if deleted_ok and (not inserted_ok or not recompute_ok) and prev_snapshot:
@@ -440,8 +451,7 @@ def orders_execution_update_supabase(
                         # 스냅샷 복원
                         sb.table("cycle_trades").insert(prev_snapshot).execute()
                         logging.info(f"[롤백] 기존 데이터 {len(prev_snapshot)}건 복원 완료. recompute 재시도.")
-                        # 복원 후 recompute 재시도
-                        _trigger_recompute(cycle_id)
+                        _trigger_recompute(cycle_id)  # 롤백이므로 pending 무시
                     except Exception as re:
                         logging.error(f"[롤백] 복원 실패: {re}. 수동 확인 필요.")
 
@@ -524,6 +534,14 @@ def orders_execution_update_supabase(
                 f"▶ (보유잔고 조회 실패)\n"
                 f"▶ 실제 HTS 체결내역\n"
                 f"{_ctx['formatted_orders']}")
+
+        # 체결내역 알림 후 종료/재시작 알림 발송 (recompute에서 지연된 알림)
+        if not is_test_mode:
+            for _notif in _pending_notifs:
+                try:
+                    send_telegram_message(TELEGRAM_BOT_TOKEN, _notif.get("chat_id", TELEGRAM_CHAT_ID), _notif["message"])
+                except Exception as _ne:
+                    logging.warning(f"지연 알림 발송 실패: {_ne}")
 
         logging.info(f"{cycle_seq}번 사이클 체결내역 업데이트 완료!")
 
