@@ -233,10 +233,6 @@ def setup_logging(log_file: str = "log.log", level: int = logging.INFO) -> None:
     _logging_initialized = True
 
 
-# 기본 로깅 설정 (utils.py import 시 자동 적용)
-setup_logging()
-
-
 def get_monitor_info(hwnd, timeout=120):
     """해당 창이 어느 모니터에 있는지 확인합니다."""
     start_time = time.time()
