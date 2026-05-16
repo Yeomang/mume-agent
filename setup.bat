@@ -258,13 +258,15 @@ echo.
 :: ─────────────────────────────────────
 echo [7/7] 윈도우 스케줄러 작업 등록 중...
 
-:: 에이전트 자동 시작 (로그온 시)
+:: 에이전트 자동 시작 (시스템 시작 시)
 schtasks /query /tn "MumeAgent_Startup" >nul 2>&1
 if %errorlevel% neq 0 (
-    schtasks /create /tn "MumeAgent_Startup" /tr "\"%INSTALL_DIR%\hts_agent.bat\"" /sc onlogon /rl highest /f >nul
-    echo       [등록] MumeAgent_Startup (로그온 시 에이전트 자동 시작)
+    schtasks /create /tn "MumeAgent_Startup" /tr "\"%INSTALL_DIR%\hts_agent.bat\"" /sc onstart /ru SYSTEM /rl highest /f >nul
+    echo       [등록] MumeAgent_Startup (시스템 시작 시 에이전트 자동 시작)
 ) else (
-    echo       [존재] MumeAgent_Startup
+    schtasks /delete /tn "MumeAgent_Startup" /f >nul 2>&1
+    schtasks /create /tn "MumeAgent_Startup" /tr "\"%INSTALL_DIR%\hts_agent.bat\"" /sc onstart /ru SYSTEM /rl highest /f >nul
+    echo       [갱신] MumeAgent_Startup (onlogon → onstart 변경)
 )
 
 :: 아침 작업 (화수목금토 08:10)
@@ -307,7 +309,7 @@ echo   설치 경로: %INSTALL_DIR%
 echo   에이전트 포트: 9000
 echo.
 echo   스케줄:
-echo     - 에이전트 시작: 로그온 시 자동
+echo     - 에이전트 시작: 시스템 부팅 시 자동
 echo     - 시간외 매수:   화수목금토 06:10
 echo     - 아침 체결수집: 화수목금토 08:10
 echo     - 저녁 자동주문: 월화수목금 18:10
