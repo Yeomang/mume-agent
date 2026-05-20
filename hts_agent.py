@@ -45,7 +45,7 @@ from utils import block_input
 BASE_DIR = Path(__file__).resolve().parent
 LOG_FILE = BASE_DIR / "log.log"
 AGENT_LOG_FILE = BASE_DIR / "log_agent.log"
-AGENT_KEY = os.getenv("HTS_AGENT_KEY", "")
+AGENT_KEY = Config.HTS_AGENT_KEY
 
 # 에이전트 서버 전용 파일 로깅 (uvicorn 프로세스 시작/종료/에러 추적용)
 _agent_logger = logging.getLogger("hts_agent")

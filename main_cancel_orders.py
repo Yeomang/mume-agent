@@ -121,9 +121,6 @@ def run_cancel_orders_job(is_test_mode: bool = False, manual: bool = False):
     # ─────────────────────────────────────
     # 3) 메인 플로우
     # ─────────────────────────────────────
-    TELEGRAM_BOT_TOKEN = Config.TELEGRAM_BOT_TOKEN_ORDER
-    TELEGRAM_CHAT_ID = Config.TELEGRAM_CHAT_ID
-
     set_log_context(job="cancel")
     logging.info(f"자동실행대상: {user_accounts}")
     results = []  # 결과 수집용
@@ -175,14 +172,14 @@ def run_cancel_orders_job(is_test_mode: bool = False, manual: bool = False):
     # ─────────────────────────────────────
     # 4) 텔레그램 알림 전송
     # ─────────────────────────────────────
-    if results and TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+    if results and Config.TELEGRAM_BOT_TOKEN_ORDER and Config.TELEGRAM_CHAT_ID:
         test_label = " [테스트]" if is_test_mode else ""
         result_lines = "\n".join(results)
         message = (
             f"📋 *미체결 주문 일괄취소 완료{test_label}*\n\n"
             f"{result_lines}"
         )
-        send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message)
+        send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, message)
 
 
 def main():

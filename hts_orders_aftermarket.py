@@ -17,8 +17,6 @@ import pandas as pd
 import yfinance as yf
 import traceback
 
-TELEGRAM_BOT_TOKEN = Config.TELEGRAM_BOT_TOKEN_ORDER
-TELEGRAM_CHAT_ID = Config.TELEGRAM_CHAT_ID
 
 
 def _get_active_cycles(sb, selected_user, account_index, auth_user_ids=None, cycles=None):
@@ -210,7 +208,7 @@ def hts_orders_aftermarket(
                         f"*{formatted_orders}*"
                         f"{fail_section}"
                     )
-                    send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message)
+                    send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, message)
                 else:
                     message = (
                         f"📉 *[무매사이클 #{cycle_seq}] Aftermarket 매수 주문 실패❌*\n\n"
@@ -223,7 +221,7 @@ def hts_orders_aftermarket(
                         f"▶ 에러내역\n"
                         f"*{order_buy_error}*"
                     )
-                    send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message)
+                    send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, message)
             else:
                 logging.info(">>>>> Aftermarket에서 추가매수할 데이터가 없으므로 주문을 SKIP합니다. <<<<<")
 

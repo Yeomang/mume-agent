@@ -20,8 +20,6 @@ import yfinance as yf
 from hts_orders_history_save_to_csv import save_orders_history
 from order_history_data_preprocessing import order_history_data_preprocessing
 
-TELEGRAM_BOT_TOKEN = Config.TELEGRAM_BOT_TOKEN_ORDER
-TELEGRAM_CHAT_ID = Config.TELEGRAM_CHAT_ID
 
 
 def _get_aftermarket_price(ticker: str) -> float | None:
@@ -338,13 +336,13 @@ def hts_orders_from_supabase(
                         f"▶ 에러내역\n"
                         f"(HTS로부터 가져온 해외주식 보유잔고 데이터와 DB에 기록된 최신 보유수가 일치하지 않음. DB 및 HTS 재확인 필요)"
                     )
-                    send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message)
+                    send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, message)
                     continue
             else:
                 # CSV에 해당 종목이 없음: 시작전(보유수0)이면 정상, 진행중이면 경고
                 if holding_qty_from_db > 0:
                     logging.warning(f"[경고] 종목코드 '{ticker}' 가 df_balance에 존재하지 않지만 DB 보유수는 {holding_qty_from_db}주. 스킵합니다.")
-                    send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+                    send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID,
                         f"⚠️ *[무매사이클 #{cycle_seq}] 잔고 확인 불가*\n\n"
                         f"▶ 종목: {ticker} ({method_ver})\n"
                         f"▶ DB 보유수: {holding_qty_from_db}주\n"
@@ -358,7 +356,7 @@ def hts_orders_from_supabase(
             # CSV 파일 자체가 없음
             if holding_qty_from_db > 0:
                 logging.warning(f"해외주식 보유잔고 CSV 파일이 없고 DB 보유수는 {holding_qty_from_db}주. 진행중 사이클이므로 스킵합니다.")
-                send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+                send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID,
                     f"⚠️ *[무매사이클 #{cycle_seq}] 잔고 CSV 없음*\n\n"
                     f"▶ 종목: {ticker} ({method_ver})\n"
                     f"▶ DB 보유수: {holding_qty_from_db}주\n"
@@ -451,7 +449,7 @@ def hts_orders_from_supabase(
         if aftermarket_mode:
             if not is_aftermarket_open():
                 logging.warning("═══ 애프터마켓 시간 초과 (ET 19:50 이후): 주문 불가. 이 사이클을 건너뜁니다. ═══")
-                send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+                send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID,
                     f"⚠️ *[무매사이클 #{cycle_seq}] 주문 불가*\n\n"
                     f"▶ 종목: {ticker} ({method_ver})\n"
                     f"▶ 사유: 애프터마켓 시간(ET 16:00~19:50) 초과\n"
@@ -588,7 +586,7 @@ def hts_orders_from_supabase(
             f"▶ 실제 HTS 주문내역\n"
             f"{order_lines}"
         )
-        send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message)
+        send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, message)
 
 
 if __name__ == "__main__":

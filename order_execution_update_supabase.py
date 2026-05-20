@@ -13,8 +13,6 @@ import datetime as dt
 import pandas as pd
 import httpx
 
-TELEGRAM_BOT_TOKEN = Config.TELEGRAM_BOT_TOKEN_EXECUTION
-TELEGRAM_CHAT_ID = Config.TELEGRAM_CHAT_ID
 
 
 def _get_active_cycles(sb, selected_user, account_index, auth_user_ids=None, cycles=None):
@@ -471,12 +469,12 @@ def orders_execution_update_supabase(
         _ctx = _telegram_context
 
         if _ctx["is_rerun"] and _ctx["added_count"] <= 0:
-            send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+            send_telegram_message(Config.TELEGRAM_BOT_TOKEN_EXECUTION, Config.TELEGRAM_CHAT_ID,
                 f"💵 *[무매사이클 #{cycle_seq}] 추가 체결 없음*\n\n"
                 f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
                 f"▶ 종목: *{ticker} ({method_ver})*")
         elif _ctx["is_rerun"] and _ctx["added_count"] > 0:
-            send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+            send_telegram_message(Config.TELEGRAM_BOT_TOKEN_EXECUTION, Config.TELEGRAM_CHAT_ID,
                 f"💵 *[무매사이클 #{cycle_seq}] 추가 체결 {_ctx['added_count']}건*\n\n"
                 f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
                 f"▶ 종목: *{ticker} ({method_ver})*\n"
@@ -494,7 +492,7 @@ def orders_execution_update_supabase(
                 average_price = filtered['평균가'].iloc[0]
                 profit = filtered['평가손익'].iloc[0]
                 profit_rate = filtered['수익률(%)'].iloc[0]
-                send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+                send_telegram_message(Config.TELEGRAM_BOT_TOKEN_EXECUTION, Config.TELEGRAM_CHAT_ID,
                     f"💵 *[무매사이클 #{cycle_seq}] 매매 체결 내역*\n\n"
                     f"▶ {inquiry_start_date}~{inquiry_end_date}\n"
                     f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
@@ -508,7 +506,7 @@ def orders_execution_update_supabase(
                     f"▶ 실제 HTS 체결내역\n"
                     f"{_ctx['formatted_orders']}")
             else:
-                send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+                send_telegram_message(Config.TELEGRAM_BOT_TOKEN_EXECUTION, Config.TELEGRAM_CHAT_ID,
                     f"💵 *[무매사이클 #{cycle_seq}] 매매 체결 내역*\n\n"
                     f"▶ {inquiry_start_date}~{inquiry_end_date}\n"
                     f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
@@ -522,7 +520,7 @@ def orders_execution_update_supabase(
                     f"{_ctx['formatted_orders']}")
         else:
             # 보유잔고 CSV 로드 실패 시에도 체결 내역은 전송
-            send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+            send_telegram_message(Config.TELEGRAM_BOT_TOKEN_EXECUTION, Config.TELEGRAM_CHAT_ID,
                 f"💵 *[무매사이클 #{cycle_seq}] 매매 체결 내역*\n\n"
                 f"▶ {inquiry_start_date}~{inquiry_end_date}\n"
                 f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
@@ -539,7 +537,7 @@ def orders_execution_update_supabase(
         if not is_test_mode:
             for _notif in _pending_notifs:
                 try:
-                    send_telegram_message(TELEGRAM_BOT_TOKEN, _notif.get("chat_id", TELEGRAM_CHAT_ID), _notif["message"])
+                    send_telegram_message(Config.TELEGRAM_BOT_TOKEN_EXECUTION, _notif.get("chat_id", Config.TELEGRAM_CHAT_ID), _notif["message"])
                 except Exception as _ne:
                     logging.warning(f"지연 알림 발송 실패: {_ne}")
 
