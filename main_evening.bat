@@ -13,7 +13,7 @@ if %errorlevel% equ 0 (
 netstat -ano 2>nul | findstr ":9000.*LISTENING" >nul 2>&1
 if %errorlevel% neq 0 (
     start "" "C:\mume-agent\hts_agent.bat"
-    timeout /t 10 /nobreak >nul
+    timeout /t 30 /nobreak >nul
 )
 
 start "" /high "C:\mume-agent\.venv\Scripts\python.exe" "C:\mume-agent\main_evening.py"
