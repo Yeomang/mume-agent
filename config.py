@@ -2,7 +2,8 @@
 
 """
 환경 변수 로드 및 설정 관리 모듈
-.env 파일에서 민감한 정보를 불러옵니다.
+부트스트랩 설정(.env): SUPABASE_URL, SUPABASE_KEY, HTS_AGENT_KEY, CONSOLE_URL
+운영 설정(DB): 텔레그램 토큰, chat_id, HTS 경로 등
 """
 
 import os
@@ -10,7 +11,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 import logging
 
-# .env 파일 로드
+# .env 파일 로드 (부트스트랩 값만 사용)
 BASE_DIR = Path(__file__).resolve().parent
 ENV_FILE = BASE_DIR / ".env"
 
@@ -23,43 +24,40 @@ else:
 class Config:
     """애플리케이션 설정 클래스"""
 
-    # 텔레그램 설정
+    # ── 부트스트랩 설정 (.env) ──
+    SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+    SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+    HTS_AGENT_KEY = os.getenv("HTS_AGENT_KEY", "")
+    CONSOLE_URL = os.getenv("CONSOLE_URL", "")
+
+    # ── 운영 설정 (DB에서 로드, .env 폴백) ──
     TELEGRAM_BOT_TOKEN_ORDER = os.getenv("TELEGRAM_BOT_TOKEN_ORDER", "")
     TELEGRAM_BOT_TOKEN_EXECUTION = os.getenv("TELEGRAM_BOT_TOKEN_EXECUTION", "")
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
-    # HTS 설정
     _DEFAULT_HTS_EXE_PATH = r"C:\MeritzFire\iMeritz\imeritzmain.exe"
     HTS_EXE_PATH = os.getenv("HTS_EXE_PATH", "") or _DEFAULT_HTS_EXE_PATH
     HTS_WINDOW_NAME = os.getenv("HTS_WINDOW_NAME", "") or "iMeritz"
 
-    # Supabase 설정
-    SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-    SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
-
-    # HTS Agent 인증 키 (콘솔의 HTS_AGENT_SECRET과 동일한 값)
-    HTS_AGENT_KEY = os.getenv("HTS_AGENT_KEY", "")
-
-    # 콘솔 API URL (recompute 트리거용)
-    CONSOLE_URL = os.getenv("CONSOLE_URL", "")
-
-    # 이 에이전트가 담당하는 계정의 auth_user_id (설정 시 해당 계정만 처리)
     AGENT_AUTH_USER_ID = os.getenv("AGENT_AUTH_USER_ID", "")
+
+    _db_loaded = False
 
     @classmethod
     def load_from_console_db(cls):
-        """콘솔 DB(agent_settings)에서 설정을 로드하여 .env 폴백 값을 덮어쓴다.
-        부트스트랩 정보(SUPABASE_*, CONSOLE_URL, HTS_AGENT_KEY)는 .env 고정.
-        """
+        """콘솔 DB(agent_settings)에서 운영 설정을 로드한다."""
+        if cls._db_loaded:
+            return
         try:
             from supabase_client import get_supabase_client
             sb = get_supabase_client()
             if not sb:
+                logging.warning("[config] Supabase 클라이언트 없음. .env 폴백 사용.")
                 return
 
-            # agent_secret으로 자기 계정 역조회
             agent_key = cls.HTS_AGENT_KEY
             if not agent_key:
+                logging.warning("[config] HTS_AGENT_KEY 미설정. DB 로드 건너뜀.")
                 return
 
             res = (
@@ -70,11 +68,10 @@ class Config:
                 .execute()
             )
             if not res.data:
-                logging.info("[config] 콘솔 DB에서 에이전트 설정을 찾을 수 없음 (agent_secret 불일치). .env 값 사용.")
+                logging.warning("[config] 콘솔 DB에서 에이전트 설정을 찾을 수 없음 (agent_secret 불일치).")
                 return
 
             row = res.data[0]
-            # DB 값이 있으면 덮어쓰기, 없으면 .env 값 유지
             if row.get("telegram_bot_token_order"):
                 cls.TELEGRAM_BOT_TOKEN_ORDER = row["telegram_bot_token_order"]
             if row.get("telegram_bot_token_execution"):
@@ -88,9 +85,10 @@ class Config:
             if row.get("auth_user_id") and not cls.AGENT_AUTH_USER_ID:
                 cls.AGENT_AUTH_USER_ID = row["auth_user_id"]
 
-            logging.info("[config] 콘솔 DB에서 설정 로드 완료 (TG/HTS 설정 동기화)")
+            cls._db_loaded = True
+            logging.info("[config] 콘솔 DB에서 설정 로드 완료")
         except Exception as e:
-            logging.warning(f"[config] 콘솔 DB 설정 로드 실패 (무시, .env 폴백): {e}")
+            logging.warning(f"[config] 콘솔 DB 설정 로드 실패 (.env 폴백): {e}")
 
     @classmethod
     def validate(cls) -> bool:
@@ -132,10 +130,11 @@ class Config:
         logging.info(f"  - HTS 실행 경로: {cls.HTS_EXE_PATH}")
         logging.info(f"  - HTS 창 이름: {cls.HTS_WINDOW_NAME}")
         logging.info(f"  - 콘솔 URL: {mask_token(cls.CONSOLE_URL)}")
+        logging.info(f"  - DB 로드: {'완료' if cls._db_loaded else '미완료 (.env 폴백)'}")
         logging.info("=" * 60)
 
 
-# 모듈 임포트 시 자동으로 설정 검증
-if __name__ != "__main__":
-    if not Config.validate():
-        logging.warning("[config] 설정 검증 실패. 일부 기능이 제대로 작동하지 않을 수 있습니다.")
+# 모듈 임포트 시 DB에서 설정 로드 → 검증
+Config.load_from_console_db()
+if not Config.validate():
+    logging.warning("[config] 설정 검증 실패. 일부 기능이 제대로 작동하지 않을 수 있습니다.")
