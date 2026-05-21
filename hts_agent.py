@@ -87,7 +87,7 @@ LAST_STATUS: Dict[str, Dict[str, Optional[str]]] = {
     for job in JOB_CONFIG
 }
 PROC_LOCK = threading.Lock()
-_last_no_session_alert: Optional[dt.datetime] = None
+_alerted_jobs: set = set()  # (job, date_str) 이미 알림 보낸 것
 
 # ─────────────────────────────────────
 # FastAPI 앱
@@ -99,8 +99,7 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 @app.on_event("startup")
 def on_startup():
     _agent_logger.info("═══ HTS Agent 서버 시작 (port 9000) ═══")
-    if platform.system() == "Windows":
-        threading.Thread(target=_session_monitor_loop, daemon=True, name="session-monitor").start()
+    threading.Thread(target=_job_log_monitor_loop, daemon=True, name="job-log-monitor").start()
 
 
 @app.on_event("shutdown")
@@ -1027,58 +1026,70 @@ def _auto_update_on_startup():
         write_log("AUTO_UPDATE_ERROR", "deploy", f"자동 업데이트 실패 (무시하고 진행): {e}")
 
 
-def _has_user_session() -> bool:
-    """세션 0(SYSTEM/services) 외 사용자 세션이 존재하는지 확인."""
+# job별 예약 시간: (실행 요일 집합(0=월..6=일), 시, 분)
+_JOB_MONITOR_SCHEDULE = {
+    "morning":     ({1, 2, 3, 4, 5}, 7,  0),   # 화~토 07:00
+    "evening":     ({0, 1, 2, 3, 4}, 18, 10),  # 월~금 18:10
+    "aftermarket": ({1, 2, 3, 4, 5}, 6,  10),  # 화~토 06:10
+}
+_CHECK_AFTER_MIN = 30   # 예약 시간 후 몇 분 뒤에 체크 시작
+_CHECK_WINDOW_MIN = 60  # 체크 유효 구간 (30~90분 사이)
+
+
+def _job_ran_today(job: str) -> bool:
+    """오늘 날짜로 해당 job의 실행 기록이 log.log에 있는지 확인."""
+    today = dt.date.today().strftime("%Y-%m-%d")
     try:
-        result = subprocess.run(
-            ["qwinsta"], capture_output=True, text=True, timeout=10
-        )
-        for line in result.stdout.splitlines()[1:]:
-            low = line.lower()
-            if "services" in low or ("rdp-tcp" in low and "listen" in low):
-                continue
-            if "active" in low or "disc" in low:
-                return True
-        return False
+        with open(LOG_FILE, encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if today in line and f"[{job}]" in line:
+                    return True
     except Exception:
-        return False
+        pass
+    return False
 
 
-def _session_monitor_loop() -> None:
-    """[TEST] 1분마다 사용자 세션 존재 여부를 체크하여 없으면 텔레그램 알림 (1분에 1번)."""
+def _job_log_monitor_loop() -> None:
+    """5분마다 job 예약 시간 +30분 후에 실행 기록을 확인하여 없으면 텔레그램 알림."""
     import time
-    global _last_no_session_alert
-    time.sleep(60)  # 시작 직후 1분 대기 (Config 로드 완료 보장)
+    time.sleep(60)
     while True:
         try:
-            if not _has_user_session():
-                now = dt.datetime.now()
-                cooldown_ok = (
-                    _last_no_session_alert is None
-                    or (now - _last_no_session_alert).total_seconds() >= 60  # TEST: 1분
-                )
-                if cooldown_ok:
-                    _last_no_session_alert = now
-                    token = Config.TELEGRAM_BOT_TOKEN_ORDER  # TEST
-                    chat_id = Config.TELEGRAM_CHAT_ID
-                    if token and chat_id:
-                        from utils import send_telegram_message
-                        send_telegram_message(
-                            token, chat_id,
-                            "🔴 *자동매매 일시 중단*\n\n"
-                            "서버가 재시작되어 자동매매가 실행되지 않습니다.\n"
-                            "(Morning 체결내역 업데이트 · Evening 주문 실행 · Aftermarket 시간외 추가매수)\n\n"
-                            "*해결 방법*\n"
-                            "① 서버에 원격 접속(RDP)\n"
-                            "② 바탕화면이 뜨면 RDP 창 닫기 (× 버튼, 로그아웃 아님)\n\n"
-                            "이후 자동매매가 자동으로 재개됩니다. ✅",
-                        )
-                    _agent_logger.warning("사용자 세션 없음 — 텔레그램 알림 전송")
-            else:
-                _last_no_session_alert = None  # 세션 복구 시 쿨다운 리셋
+            now = dt.datetime.now()
+            weekday = now.weekday()
+            for job, (days, hour, minute) in _JOB_MONITOR_SCHEDULE.items():
+                if weekday not in days:
+                    continue
+                scheduled = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                check_start = scheduled + dt.timedelta(minutes=_CHECK_AFTER_MIN)
+                check_end   = check_start + dt.timedelta(minutes=_CHECK_WINDOW_MIN)
+                if not (check_start <= now <= check_end):
+                    continue
+                key = (job, now.date().isoformat())
+                if key in _alerted_jobs:
+                    continue
+                if _job_ran_today(job):
+                    continue
+                _alerted_jobs.add(key)
+                token = Config.TELEGRAM_BOT_TOKEN_ORDER
+                chat_id = Config.TELEGRAM_CHAT_ID
+                if token and chat_id:
+                    from utils import send_telegram_message
+                    label = JOB_LABEL.get(job, job)
+                    send_telegram_message(
+                        token, chat_id,
+                        f"🔴 *{label} Job 미실행*\n\n"
+                        f"{label} 자동매매가 오늘 실행되지 않았습니다.\n"
+                        "(Morning 체결내역 업데이트 · Evening 주문 실행 · Aftermarket 시간외 추가매수)\n\n"
+                        "*해결 방법*\n"
+                        "① 서버에 원격 접속(RDP)\n"
+                        "② 바탕화면이 뜨면 RDP 창 닫기 (× 버튼, 로그아웃 아님)\n\n"
+                        "이후 콘솔에서 수동 실행하거나 내일부터 자동 재개됩니다. ✅",
+                    )
+                _agent_logger.warning(f"[{job}] 오늘 실행 기록 없음 — 텔레그램 알림 전송")
         except Exception as e:
-            _agent_logger.error(f"세션 모니터 오류: {e}")
-        time.sleep(60)  # TEST: 1분마다 체크
+            _agent_logger.error(f"job 로그 모니터 오류: {e}")
+        time.sleep(300)  # 5분마다 체크
 
 
 # 앱 시작 시 자동 업데이트 실행
