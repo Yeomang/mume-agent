@@ -3,14 +3,14 @@ cd /d "C:\mume-agent"
 echo [%date% %time%] [evening] bat started >> "C:\mume-agent\log.log"
 call "C:\mume-agent\.venv\Scripts\activate.bat"
 
-:: 에이전트 자동시작 스케줄러를 onstart로 보정 (1회성 자동 수정)
+:: Fix MumeAgent_Startup: onlogon -> onstart/SYSTEM (one-time)
 schtasks /query /tn "MumeAgent_Startup" /fo csv /nh 2>nul | findstr /i "logon" >nul 2>&1
 if %errorlevel% equ 0 (
     schtasks /delete /tn "MumeAgent_Startup" /f >nul 2>&1
     schtasks /create /tn "MumeAgent_Startup" /tr "C:\mume-agent\hts_agent.bat" /sc onstart /ru SYSTEM /rl highest /f >nul 2>&1
 )
 
-:: 에이전트가 안 떠있으면 백그라운드로 기동 (시작 시 자동 업데이트 포함)
+:: Start agent in background if not running
 netstat -ano 2>nul | findstr ":9000.*LISTENING" >nul 2>&1
 if %errorlevel% neq 0 (
     start "" "C:\mume-agent\hts_agent.bat"
