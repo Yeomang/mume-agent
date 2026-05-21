@@ -1,27 +1,14 @@
 # C:\mume-agent\main_aftermarket.py
 
-import os
-from pathlib import Path
-import json
 import logging
-import traceback
 import sys
+import traceback
+from pathlib import Path
 
-from utils import set_log_context, install_log_context_filter
-from hts_login import hts_login
-from hts_orders_execution_save_to_csv import save_data_order_execution
-from order_execution_data_preprocessing import order_execution_data_preprocessing
-from hts_orders_aftermarket import hts_orders_aftermarket
-from utils import kill_window_by_title, to_yyyymmdd
-from job_control import register_job_pid, unregister_job_pid
-from automation_target_store import load_automation_target
-from config import Config
-
+# ─────────────────────────────
+# 로깅 최우선 설정 — import 실패도 반드시 기록
+# ─────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
-
-# ─────────────────────────────
-# 로깅 설정 + 전역 예외 훅
-# ─────────────────────────────
 LOG_FILE = BASE_DIR / "log.log"
 
 logging.basicConfig(
@@ -31,14 +18,26 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     encoding="utf-8",
 )
-install_log_context_filter()
 
 def log_uncaught_exceptions(exctype, value, tb):
-    """전역(마지막까지 처리 안 된) 예외를 모두 log.log에 traceback 포함해서 기록"""
     logging.error("=== Uncaught Exception ===")
     logging.error("".join(traceback.format_exception(exctype, value, tb)))
 
 sys.excepthook = log_uncaught_exceptions
+
+import os
+import json
+
+from utils import set_log_context, install_log_context_filter
+install_log_context_filter()
+from hts_login import hts_login
+from hts_orders_execution_save_to_csv import save_data_order_execution
+from order_execution_data_preprocessing import order_execution_data_preprocessing
+from hts_orders_aftermarket import hts_orders_aftermarket
+from utils import kill_window_by_title, to_yyyymmdd
+from job_control import register_job_pid, unregister_job_pid
+from automation_target_store import load_automation_target
+from config import Config
 
 
 def run_aftermarket_job(is_test_mode: bool = False, manual: bool = False):

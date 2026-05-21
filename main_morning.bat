@@ -1,5 +1,6 @@
 @echo off
 cd /d "C:\mume-agent"
+echo [%date% %time%] [morning] bat started >> "C:\mume-agent\log.log"
 call "C:\mume-agent\.venv\Scripts\activate.bat"
 
 :: 에이전트 자동시작 스케줄러를 onstart로 보정 (1회성 자동 수정)
