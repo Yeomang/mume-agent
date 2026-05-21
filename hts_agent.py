@@ -1045,7 +1045,7 @@ def _has_user_session() -> bool:
 
 
 def _session_monitor_loop() -> None:
-    """30분마다 사용자 세션 존재 여부를 체크하여 없으면 텔레그램 알림 (1시간에 1번)."""
+    """[TEST] 1분마다 사용자 세션 존재 여부를 체크하여 없으면 텔레그램 알림 (1분에 1번)."""
     import time
     global _last_no_session_alert
     time.sleep(60)  # 시작 직후 1분 대기 (Config 로드 완료 보장)
@@ -1055,11 +1055,11 @@ def _session_monitor_loop() -> None:
                 now = dt.datetime.now()
                 cooldown_ok = (
                     _last_no_session_alert is None
-                    or (now - _last_no_session_alert).total_seconds() >= 3600
+                    or (now - _last_no_session_alert).total_seconds() >= 60  # TEST: 1분
                 )
                 if cooldown_ok:
                     _last_no_session_alert = now
-                    token = Config.TELEGRAM_BOT_TOKEN_ORDER
+                    token = Config.TELEGRAM_BOT_TOKEN_ORDER  # TEST
                     chat_id = Config.TELEGRAM_CHAT_ID
                     if token and chat_id:
                         from utils import send_telegram_message
@@ -1078,7 +1078,7 @@ def _session_monitor_loop() -> None:
                 _last_no_session_alert = None  # 세션 복구 시 쿨다운 리셋
         except Exception as e:
             _agent_logger.error(f"세션 모니터 오류: {e}")
-        time.sleep(1800)  # 30분마다 체크
+        time.sleep(60)  # TEST: 1분마다 체크
 
 
 # 앱 시작 시 자동 업데이트 실행
