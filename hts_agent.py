@@ -87,6 +87,7 @@ LAST_STATUS: Dict[str, Dict[str, Optional[str]]] = {
     for job in JOB_CONFIG
 }
 PROC_LOCK = threading.Lock()
+_last_no_session_alert: Optional[dt.datetime] = None
 
 # ─────────────────────────────────────
 # FastAPI 앱
@@ -98,6 +99,8 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 @app.on_event("startup")
 def on_startup():
     _agent_logger.info("═══ HTS Agent 서버 시작 (port 9000) ═══")
+    if platform.system() == "Windows":
+        threading.Thread(target=_session_monitor_loop, daemon=True, name="session-monitor").start()
 
 
 @app.on_event("shutdown")
@@ -1022,6 +1025,57 @@ def _auto_update_on_startup():
             write_log("AUTO_UPDATE", "deploy", "이미 최신 버전입니다.")
     except Exception as e:
         write_log("AUTO_UPDATE_ERROR", "deploy", f"자동 업데이트 실패 (무시하고 진행): {e}")
+
+
+def _has_user_session() -> bool:
+    """세션 0(SYSTEM/services) 외 사용자 세션이 존재하는지 확인."""
+    try:
+        result = subprocess.run(
+            ["qwinsta"], capture_output=True, text=True, timeout=10
+        )
+        for line in result.stdout.splitlines()[1:]:
+            low = line.lower()
+            if "services" in low or ("rdp-tcp" in low and "listen" in low):
+                continue
+            if "active" in low or "disc" in low:
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _session_monitor_loop() -> None:
+    """30분마다 사용자 세션 존재 여부를 체크하여 없으면 텔레그램 알림 (1시간에 1번)."""
+    import time
+    global _last_no_session_alert
+    time.sleep(60)  # 시작 직후 1분 대기 (Config 로드 완료 보장)
+    while True:
+        try:
+            if not _has_user_session():
+                now = dt.datetime.now()
+                cooldown_ok = (
+                    _last_no_session_alert is None
+                    or (now - _last_no_session_alert).total_seconds() >= 3600
+                )
+                if cooldown_ok:
+                    _last_no_session_alert = now
+                    token = Config.TELEGRAM_BOT_TOKEN_ORDER
+                    chat_id = Config.TELEGRAM_CHAT_ID
+                    if token and chat_id:
+                        from utils import send_telegram_message
+                        send_telegram_message(
+                            token, chat_id,
+                            "⚠️ *서버 세션 없음*\n\n"
+                            "서버가 재부팅되어 사용자 세션이 없습니다.\n"
+                            "HTS Job(Morning/Evening/Aftermarket)을 실행할 수 없습니다.\n\n"
+                            "서버에 한 번 로그인해 주세요.",
+                        )
+                    _agent_logger.warning("사용자 세션 없음 — 텔레그램 알림 전송")
+            else:
+                _last_no_session_alert = None  # 세션 복구 시 쿨다운 리셋
+        except Exception as e:
+            _agent_logger.error(f"세션 모니터 오류: {e}")
+        time.sleep(1800)  # 30분마다 체크
 
 
 # 앱 시작 시 자동 업데이트 실행
