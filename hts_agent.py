@@ -1067,7 +1067,7 @@ def _session_monitor_loop() -> None:
                             token, chat_id,
                             "🔴 *자동매매 일시 중단*\n\n"
                             "서버가 재시작되어 자동매매가 실행되지 않습니다.\n"
-                            "(아침 체결 · 저녁 정산 · 시간외 추가매수 모두 해당)\n\n"
+                            "(Morning 체결내역 업데이트 · Evening 주문 실행 · Aftermarket 시간외 추가매수)\n\n"
                             "*해결 방법*\n"
                             "① 서버에 원격 접속(RDP)\n"
                             "② 바탕화면이 뜨면 RDP 창 닫기 (× 버튼, 로그아웃 아님)\n\n"
