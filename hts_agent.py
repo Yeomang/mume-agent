@@ -1065,10 +1065,13 @@ def _session_monitor_loop() -> None:
                         from utils import send_telegram_message
                         send_telegram_message(
                             token, chat_id,
-                            "⚠️ *서버 세션 없음*\n\n"
-                            "서버가 재부팅되어 사용자 세션이 없습니다.\n"
-                            "HTS Job(Morning/Evening/Aftermarket)을 실행할 수 없습니다.\n\n"
-                            "서버에 한 번 로그인해 주세요.",
+                            "🔴 *자동매매 일시 중단*\n\n"
+                            "서버가 재시작되어 자동매매가 실행되지 않습니다.\n"
+                            "(아침 체결 · 저녁 정산 · 시간외 추가매수 모두 해당)\n\n"
+                            "*해결 방법*\n"
+                            "① 서버에 원격 접속(RDP)\n"
+                            "② 바탕화면이 뜨면 RDP 창 닫기 (× 버튼, 로그아웃 아님)\n\n"
+                            "이후 자동매매가 자동으로 재개됩니다. ✅",
                         )
                     _agent_logger.warning("사용자 세션 없음 — 텔레그램 알림 전송")
             else:
