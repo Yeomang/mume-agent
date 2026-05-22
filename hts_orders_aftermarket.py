@@ -155,6 +155,26 @@ def hts_orders_aftermarket(
                 logging.info(f"'{ticker}'의 Aftermarket 가격 정보를 가져올 수 없습니다. 추가 주문을 건너뜁니다.")
                 continue
 
+            # [V4.0 전용] 정규장 종가 vs computed LOC 가격 비교로 aftermarket 주문 금액 결정
+            # - 종가 > 별지점LOC가: 자연 미체결 → 주문 없음
+            # - 평단LOC가 < 종가 ≤ 별지점LOC가: 별지점만 체결됐어야 할 상황 → 0.5회치
+            # - 종가 ≤ 평단LOC가 or 리버스모드: 전량 미체결 → 1회치
+            if method_ver == "V4.0":
+                v4_mode = computed.get("v4_mode", "normal")
+                prev_close = float(info.get("regularMarketPrice") or 0)
+                star_loc_price = float(computed.get("star_loc_buy_price") or 0)
+                avg_loc_price = float(computed.get("avg_loc_buy_price") or 0)
+                logging.info(f"[V4.0/{v4_mode}] 종가: ${prev_close:.2f}, 별지점LOC가: ${star_loc_price:.2f}, 평단LOC가: ${avg_loc_price:.2f}")
+
+                if prev_close > 0 and star_loc_price > 0 and prev_close > star_loc_price:
+                    logging.info(f"[V4.0] 종가(${prev_close:.2f}) > 별지점LOC가(${star_loc_price:.2f}) → 자연 미체결, aftermarket 주문 없음")
+                    continue
+                elif v4_mode == "normal" and prev_close > 0 and avg_loc_price > 0 and prev_close > avg_loc_price:
+                    remaining_daily_buy_amount = round(daily_buy_amount / 2, 2)
+                    logging.info(f"[V4.0] 별지점 체결 범위(${avg_loc_price:.2f} < 종가 ≤ ${star_loc_price:.2f}) → 0.5회치: ${remaining_daily_buy_amount:.2f}")
+                else:
+                    logging.info(f"[V4.0] 전량 체결 범위 or 리버스모드 → 1회치: ${remaining_daily_buy_amount:.2f}")
+
             aftermarket_price = round(aftermarket_price, 2)
             logging.info(f"'{ticker}' Aftermarket 현재가 : {aftermarket_price}")
 
