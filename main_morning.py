@@ -166,18 +166,26 @@ def run_morning_job(is_test_mode: bool = False, manual: bool = False):
         kill_window_by_title(hts_window_name)
     set_log_context()
 
-    # 2주 이상 된 order_status 정리
-    _cleanup_old_order_status()
+    # 2주 이상 된 order_status 정리 — 수동 실행 시 스킵 (재실행마다 추가 삭제 방지)
+    if not manual:
+        _cleanup_old_order_status()
+    else:
+        logging.info("[order-status] 수동 실행 — 오래된 레코드 정리 스킵")
 
 
 def _cleanup_old_order_status():
-    """2주 이상 된 order_status 레코드를 삭제한다."""
+    """14~60일 사이의 오래된 order_status 레코드를 삭제한다.
+
+    상한(60일)을 두는 이유: 날짜 이상 데이터나 미래 날짜 레코드를 건드리지 않기 위함.
+    """
     try:
         from supabase_client import get_supabase_client
         sb = get_supabase_client()
         if not sb:
             return
-        cutoff = (dt.date.today() - dt.timedelta(days=14)).strftime("%Y-%m-%d")
+        today = dt.date.today()
+        cutoff_lower = (today - dt.timedelta(days=60)).strftime("%Y-%m-%d")  # 삭제 범위 하한
+        cutoff_upper = (today - dt.timedelta(days=14)).strftime("%Y-%m-%d")  # 삭제 범위 상한
         uids = get_auth_user_ids()
         if not uids:
             return
@@ -186,12 +194,13 @@ def _cleanup_old_order_status():
                 sb.table("order_status")
                 .delete()
                 .eq("auth_user_id", uid)
-                .lt("order_date", cutoff)
+                .gte("order_date", cutoff_lower)
+                .lt("order_date", cutoff_upper)
                 .execute()
             )
             deleted = len(res.data) if res.data else 0
             if deleted:
-                logging.info(f"[order-status] 오래된 레코드 {deleted}건 삭제 (uid={uid[:8]})")
+                logging.info(f"[order-status] 오래된 레코드 {deleted}건 삭제 (uid={uid[:8]}, 범위={cutoff_lower}~{cutoff_upper})")
     except Exception as e:
         logging.warning(f"[order-status] 정리 실패: {e}")
 
