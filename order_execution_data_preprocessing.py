@@ -22,8 +22,18 @@ def order_execution_data_preprocessing(selected_user, account_index, inquiry_sta
         return  # 파일이 없으면 함수 실행을 즉시 종료
     
     # 파일이 존재하면 CSV 파일 읽기 (이중 헤더 처리)
-    df = pd.read_csv(file_path, encoding='cp949', header=[0, 1])  # 첫 번째와 두 번째 줄을 헤더로 읽기
-    logging.info("파일을 성공적으로 불러왔습니다.")    
+    # 메리츠 HTS CSV 인코딩이 cp949/cp1252 사이에서 변경될 수 있으므로 순차 시도
+    df = None
+    for enc in ['utf-8-sig', 'cp949', 'cp1252', 'utf-16']:
+        try:
+            df = pd.read_csv(file_path, encoding=enc, header=[0, 1])
+            logging.info(f"파일을 성공적으로 불러왔습니다. (encoding={enc})")
+            break
+        except (UnicodeDecodeError, Exception):
+            continue
+    if df is None:
+        logging.error(f"지원하는 인코딩으로 파일을 읽을 수 없습니다: {file_path}")
+        return    
     
     logging.info("원본 테이블에서 필요한 컬럼만 추출하여 새로운 데이터프레임 만드는 중...")
     # 첫 번째와 두 번째 행의 데이터를 개별 컬럼으로 분리

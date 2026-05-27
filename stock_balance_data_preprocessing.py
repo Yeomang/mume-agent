@@ -27,8 +27,17 @@ def stock_balance_data_preprocessing(selected_user, account_index):
         return
 
     # 파일이 존재하고 내용이 있을 경우만 계속 진행
-    df = pd.read_csv(file_path, encoding='cp949', header=[0, 1])
-    logging.info("파일을 성공적으로 불러왔습니다.")
+    df = None
+    for enc in ['utf-8-sig', 'cp949', 'cp1252', 'utf-16']:
+        try:
+            df = pd.read_csv(file_path, encoding=enc, header=[0, 1])
+            logging.info(f"파일을 성공적으로 불러왔습니다. (encoding={enc})")
+            break
+        except (UnicodeDecodeError, Exception):
+            continue
+    if df is None:
+        logging.error(f"지원하는 인코딩으로 파일을 읽을 수 없습니다: {file_path}")
+        return
     
     logging.info("원본 테이블에서 필요한 컬럼만 추출하여 새로운 데이터프레임 만드는 중...")
     # 첫 번째와 두 번째 행의 데이터를 개별 컬럼으로 분리
