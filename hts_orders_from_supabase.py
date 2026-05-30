@@ -420,6 +420,8 @@ def hts_orders_from_supabase(
             lambda *_: ([], [])
         )(computed)
 
+        _raw_buy_orders = list(buy_orders)
+
         # 유효하지 않은 주문 필터링
         invalid_values = {"", "0", 0, "쿼터손절모드", "None", "#N/A", "N/A", "#VALUE!", "#DIV/0!", None}
         sell_orders = [
@@ -431,6 +433,13 @@ def hts_orders_from_supabase(
             order for order in buy_orders
             if str(order["quantity"]).strip() not in invalid_values
             and str(order["price"]).strip() not in invalid_values
+        ]
+
+        # 원금 부족 감지: qty=0이지만 price는 유효한 주문 → per_buy < 주가
+        _zero_qty_buy_orders = [
+            o for o in _raw_buy_orders
+            if str(o.get("quantity", "")).strip() in {"0", 0}
+            and str(o.get("price", "")).strip() not in invalid_values
         ]
 
         # [중요] quantity를 int로 변환 — float(1.0) 상태로 HTS에 입력하면
@@ -516,6 +525,30 @@ def hts_orders_from_supabase(
             logging.info(">>>>> 매수 주문은 이미 존재하므로 스킵합니다. <<<<<")
         else:
             logging.info(">>>>> 매수할 데이터가 없으므로 주문을 SKIP합니다. <<<<<")
+            if _zero_qty_buy_orders:
+                _principal_val = float(cycle.get("principal") or 0)
+                _split_count_val = int(cycle.get("split_count") or 10)
+                _per_buy_val = float(
+                    computed.get("dynamic_per_buy") or computed.get("repeating_per_buy") or computed.get("per_buy")
+                    or (_principal_val / _split_count_val if _split_count_val else 0)
+                )
+                _max_loc_price = max(float(o["price"]) for o in _zero_qty_buy_orders)
+                _recommended_principal = round(
+                    _max_loc_price / _per_buy_val * _principal_val if _per_buy_val > 0
+                    else _max_loc_price * _split_count_val
+                )
+                _loc_prices_str = ", ".join([f"${float(o['price']):,.2f}" for o in _zero_qty_buy_orders])
+                send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID,
+                    f"⚠️ *[무매사이클 #{cycle_seq}] 원금 부족 - 매수 주문 SKIP*\n\n"
+                    f"▶ 계좌: {selected_user} | 메리츠 | {account_index}번째 계좌\n"
+                    f"▶ 종목: *{ticker}* ({method_ver})\n"
+                    f"▶ 1회매수금액: *${_per_buy_val:,.2f}*\n"
+                    f"▶ LOC 주문가: {_loc_prices_str}\n"
+                    f"→ 1회매수금액으로 1주도 매수 불가\n\n"
+                    f"💡 *원금 조정 안내*\n"
+                    f"▶ 현재 원금: *${_principal_val:,.0f}* (분할수 {_split_count_val})\n"
+                    f"▶ 권장 원금: *${_recommended_principal:,.0f}* 이상"
+                )
 
         if not is_test_mode:
             save_orders_history(selected_user, account_index)
