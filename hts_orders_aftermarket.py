@@ -218,15 +218,20 @@ def hts_orders_aftermarket(
 
             if buy_quantity == 0:
                 logging.info(">>>>> Aftermarket에서 추가매수할 데이터가 없으므로 주문을 SKIP합니다. <<<<<")
+                current_principal = float(cycle.get("principal") or 0)
+                split_count = int(cycle.get("split_count") or 10)
                 min_per_buy = buy_price * (daily_buy_amount / remaining_daily_buy_amount) if remaining_daily_buy_amount > 0 else buy_price
+                recommended_principal = round(min_per_buy * split_count)
                 message = (
                     f"⚠️ *[무매사이클 #{cycle_seq}] Aftermarket 원금 부족 - 주문 SKIP*\n\n"
                     f"▶ 계좌: {selected_user} | 메리츠 | {account_index}번째 계좌\n"
                     f"▶ 종목: *{ticker}* ({method_ver})\n"
                     f"▶ 배정금액: *${remaining_daily_buy_amount:,.2f}* (1회매수금액 ${daily_buy_amount:,.2f}의 {remaining_daily_buy_amount/daily_buy_amount*100:.0f}%)\n"
                     f"▶ Aftermarket 매수가(현재가+3%): *${buy_price:,.2f}*\n"
-                    f"→ 배정금액이 1주 가격에 미달하여 매수 불가\n"
-                    f"→ 1회매수금액 최소 *${min_per_buy:,.0f}* 이상으로 원금 조정 필요"
+                    f"→ 배정금액이 1주 가격에 미달하여 매수 불가\n\n"
+                    f"💡 *원금 조정 안내*\n"
+                    f"▶ 현재 원금: *${current_principal:,.0f}* (분할수 {split_count})\n"
+                    f"▶ 권장 원금: *${recommended_principal:,.0f}* 이상"
                 )
                 send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, message)
                 continue
