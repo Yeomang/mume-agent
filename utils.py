@@ -593,17 +593,21 @@ def is_trading_day_today():
 
 
 def is_trading_day_yesterday():
-    """미국 동부시간(ET) 기준 어제가 NYSE 거래일인지 확인."""
+    """오늘 ET 날짜가 NYSE 거래일인지 확인.
+
+    aftermarket job은 한국 오전 6시(= ET 전날 17시)에 실행되므로
+    inquiry_start_date(KST 어제 = ET 오늘)와 일치하도록 ET today를 기준으로 판단.
+    """
     nyse = mcal.get_calendar("NYSE")
     et_now = _now_et()
-    yesterday_et = (et_now - timedelta(days=1)).strftime("%Y-%m-%d")
-    schedule = nyse.schedule(start_date=yesterday_et, end_date=yesterday_et)
+    today_et = et_now.strftime("%Y-%m-%d")
+    schedule = nyse.schedule(start_date=today_et, end_date=today_et)
 
     if schedule.empty:
-        logging.info(f"어제({yesterday_et}, ET {et_now.strftime('%H:%M')})는 미국 주식시장 휴장일입니다. 주문을 실행하지 않습니다.")
+        logging.info(f"오늘({today_et}, ET {et_now.strftime('%H:%M')})는 미국 주식시장 휴장일입니다. 주문을 실행하지 않습니다.")
         return False
     else:
-        logging.info(f"어제({yesterday_et}, ET {et_now.strftime('%H:%M')})는 미국 주식시장 거래 가능한 날입니다. 주문을 실행합니다.")
+        logging.info(f"오늘({today_et}, ET {et_now.strftime('%H:%M')})는 미국 주식시장 거래 가능한 날입니다. 주문을 실행합니다.")
         return True
     
 
