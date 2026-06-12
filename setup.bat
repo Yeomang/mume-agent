@@ -313,7 +313,7 @@ echo [8/8] 윈도우 스케줄러 작업 등록 중...
 schtasks /delete /tn "MumeAgent_Startup" /f >nul 2>&1
 if "!AUTO_LOGON_CONFIGURED!"=="1" (
     :: 자동 로그인 설정 완료: Administrator 계정으로 로그인 시 실행 (HTS GUI 접근 가능)
-    schtasks /create /tn "MumeAgent_Startup" /tr "\"%INSTALL_DIR%\hts_agent.bat\"" /sc onlogon /ru Administrator /rp "!AUTO_LOGON_PWD!" /rl highest /f >nul
+    schtasks /create /tn "MumeAgent_Startup" /tr "\"%INSTALL_DIR%\hts_agent.bat\"" /sc onlogon /ru Administrator /rp "!AUTO_LOGON_PWD!" /rl highest /it /f >nul
     echo       [등록] MumeAgent_Startup (로그인 시 자동 실행 / Administrator 계정)
 ) else (
     :: 자동 로그인 미설정: 시스템 시작 시 SYSTEM 계정으로 실행 (임시)
