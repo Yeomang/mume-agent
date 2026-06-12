@@ -984,6 +984,41 @@ def configure_autologon(payload: dict = Body(...)):
     return {"message": "자동시작 설정 완료. 다음 재시작부터 에이전트가 자동으로 켜집니다."}
 
 
+@app.delete("/configure-autologon")
+def reset_autologon():
+    """Windows 자동 로그인 + MumeAgent_Startup 스케줄러 해제."""
+    if platform.system() != "Windows":
+        raise HTTPException(status_code=400, detail="Windows 전용 기능입니다.")
+
+    errors = []
+    winlogon = r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
+
+    r = subprocess.run(
+        ["reg", "add", winlogon, "/v", "AutoAdminLogon", "/t", "REG_SZ", "/d", "0", "/f"],
+        capture_output=True, text=True
+    )
+    if r.returncode != 0:
+        errors.append(f"레지스트리 초기화 실패: {r.stderr.strip()}")
+
+    subprocess.run(
+        ["reg", "delete", winlogon, "/v", "DefaultPassword", "/f"],
+        capture_output=True
+    )
+
+    r = subprocess.run(
+        ["schtasks", "/delete", "/tn", "MumeAgent_Startup", "/f"],
+        capture_output=True, text=True
+    )
+    if r.returncode != 0 and "does not exist" not in r.stderr.lower() and "존재하지" not in r.stderr:
+        errors.append(f"스케줄러 삭제 실패: {r.stderr.strip()}")
+
+    if errors:
+        raise HTTPException(status_code=500, detail="\n".join(errors))
+
+    write_log("AUTOLOGON_RESET", "configure", "자동 로그인 + 스케줄러 초기화 완료")
+    return {"message": "자동시작 설정이 초기화되었습니다. 서버 재시작 시 에이전트가 자동으로 켜지지 않습니다."}
+
+
 @app.get("/deploy-status")
 def deploy_status():
     if not DEPLOY_INFO_FILE.exists():
