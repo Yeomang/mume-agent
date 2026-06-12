@@ -19,6 +19,8 @@ import httpx
 import yfinance as yf
 from hts_orders_history_save_to_csv import save_orders_history
 from order_history_data_preprocessing import order_history_data_preprocessing
+import datetime as _dt
+from datetime import timezone as _tz, timedelta as _td
 
 
 
@@ -113,11 +115,46 @@ def _record_order_status(cycle_id: int, orders: list):
 
 
 def _get_latest_computed(sb, cycle_id):
-    """cycle_trades_latest에서 최신 computed JSON 조회"""
-    res = sb.table("cycle_trades_latest").select("computed").eq("cycle_id", cycle_id).execute()
+    """cycle_trades_latest에서 최신 computed JSON과 updated_at 조회"""
+    res = sb.table("cycle_trades_latest").select("computed, updated_at").eq("cycle_id", cycle_id).execute()
     if res.data:
-        return res.data[0].get("computed") or {}
-    return {}
+        return res.data[0].get("computed") or {}, res.data[0].get("updated_at")
+    return {}, None
+
+
+def _is_computed_fresh(updated_at_str, cycle_seq, selected_user, account_index, method_ver, ticker):
+    """computed가 72시간 이내에 업데이트됐는지 확인. 오래됐으면 텔레그램 경고 후 False 반환."""
+    if updated_at_str is None:
+        msg = (
+            f"⚠️ *[무매사이클 #{cycle_seq}] 주문 건너뜀*\n\n"
+            f"▶ 계좌: {selected_user} | {account_index}번째 계좌\n"
+            f"▶ 종목: {ticker} ({method_ver})\n"
+            f"▶ 사유: 계산 데이터(computed) 이력 없음\n"
+            f"▶ 아침 체결수집(Morning)을 수동 실행해주세요."
+        )
+        logging.warning(f"사이클 #{cycle_seq}: computed 이력 없음 → 주문 건너뜀")
+        send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, msg)
+        return False
+    try:
+        updated_at = _dt.datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=_tz.utc)
+        elapsed = _dt.datetime.now(_tz.utc) - updated_at
+        if elapsed > _td(hours=72):
+            hours = int(elapsed.total_seconds() / 3600)
+            msg = (
+                f"⚠️ *[무매사이클 #{cycle_seq}] 주문 건너뜀*\n\n"
+                f"▶ 계좌: {selected_user} | {account_index}번째 계좌\n"
+                f"▶ 종목: {ticker} ({method_ver})\n"
+                f"▶ 사유: 계산 데이터가 {hours}시간 전 기준 (72시간 초과)\n"
+                f"▶ 아침 체결수집(Morning)을 수동 실행 후 재시도해주세요."
+            )
+            logging.warning(f"사이클 #{cycle_seq}: computed {hours}시간 전 업데이트 (72시간 초과) → 주문 건너뜀")
+            send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, msg)
+            return False
+    except Exception as e:
+        logging.warning(f"사이클 #{cycle_seq}: computed updated_at 파싱 실패 ({e}) → 주문 진행")
+    return True
 
 
 def _extract_order_list_v22(computed):
@@ -277,7 +314,9 @@ def hts_orders_from_supabase(
         logging.info(f"적용 방법론 : {method_ver}")
 
         # 최신 computed 데이터 조회
-        computed = _get_latest_computed(sb, cycle_id)
+        computed, computed_updated_at = _get_latest_computed(sb, cycle_id)
+        if not _is_computed_fresh(computed_updated_at, cycle_seq, selected_user, account_index, method_ver, ticker):
+            continue
         if not computed:
             logging.info(f"사이클 #{cycle_seq}의 계산 데이터가 없습니다. 첫 주문(시작전 상태) 실행.")
 

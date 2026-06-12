@@ -8,7 +8,7 @@ from utils import (
     load_csv_if_exists,
 )
 from hts_order_buy import hts_order_buy
-from hts_orders_from_supabase import _record_order_status
+from hts_orders_from_supabase import _record_order_status, _is_computed_fresh
 from config import Config
 from supabase_client import get_supabase_client, supabase_fetch_all
 import logging
@@ -42,11 +42,11 @@ def _get_active_cycles(sb, selected_user, account_index, auth_user_ids=None, cyc
 
 
 def _get_latest_computed(sb, cycle_id):
-    """cycle_trades_latest에서 최신 computed JSON 조회"""
-    res = sb.table("cycle_trades_latest").select("computed").eq("cycle_id", cycle_id).execute()
+    """cycle_trades_latest에서 최신 computed JSON과 updated_at 조회"""
+    res = sb.table("cycle_trades_latest").select("computed, updated_at").eq("cycle_id", cycle_id).execute()
     if res.data:
-        return res.data[0].get("computed") or {}
-    return {}
+        return res.data[0].get("computed") or {}, res.data[0].get("updated_at")
+    return {}, None
 
 
 def hts_orders_aftermarket(
@@ -105,7 +105,9 @@ def hts_orders_aftermarket(
         logging.info(f"방법론 : {method_ver}")
 
         # 1회 매수금액 계산
-        computed = _get_latest_computed(sb, cycle_id)
+        computed, computed_updated_at = _get_latest_computed(sb, cycle_id)
+        if not _is_computed_fresh(computed_updated_at, cycle_seq, selected_user, account_index, method_ver, ticker):
+            continue
         if method_ver == "V2.2":
             principal = cycle.get("principal", 0)
             split_count = cycle.get("split_count", 10)
