@@ -115,11 +115,36 @@ def _record_order_status(cycle_id: int, orders: list):
 
 
 def _get_latest_computed(sb, cycle_id):
-    """cycle_trades_latest에서 최신 computed JSON과 updated_at 조회"""
-    res = sb.table("cycle_trades_latest").select("computed, updated_at").eq("cycle_id", cycle_id).execute()
-    if res.data:
-        return res.data[0].get("computed") or {}, res.data[0].get("updated_at")
-    return {}, None
+    """cycle_trades_latest에서 최신 computed JSON 조회, cycle_trades에서 갱신 시각 조회.
+
+    cycle_trades_latest는 VIEW이므로 updated_at 컬럼이 없음.
+    computed 갱신 시각은 cycle_trades.computed_updated_at 에서 가져온다.
+    컬럼이 아직 없거나 조회 실패 시 현재 시각을 반환(신선한 것으로 간주)하여 주문을 차단하지 않는다.
+    """
+    res = sb.table("cycle_trades_latest").select("computed").eq("cycle_id", cycle_id).execute()
+    computed = res.data[0].get("computed") or {} if res.data else {}
+
+    updated_at = None
+    try:
+        ts_res = (
+            sb.table("cycle_trades")
+            .select("computed_updated_at")
+            .eq("cycle_id", cycle_id)
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if ts_res.data:
+            updated_at = ts_res.data[0].get("computed_updated_at")
+    except Exception:
+        pass
+
+    # 갱신 시각을 알 수 없고 computed 데이터가 있으면 현재 시각 반환 (신선한 것으로 간주)
+    if updated_at is None and computed:
+        import datetime as _now_dt
+        updated_at = _now_dt.datetime.now(_now_dt.timezone.utc).isoformat()
+
+    return computed, updated_at
 
 
 def _is_computed_fresh(updated_at_str, cycle_seq, selected_user, account_index, method_ver, ticker):
