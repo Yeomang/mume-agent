@@ -927,6 +927,63 @@ def deploy(payload: dict = Body(...)):
         raise HTTPException(status_code=500, detail=f"배포 실패: {e}")
 
 
+@app.post("/configure-autologon")
+def configure_autologon(payload: dict = Body(...)):
+    """
+    Windows 자동 로그인 + 스케줄러 설정.
+    서버 재시작 시 Administrator로 자동 로그인되고 에이전트가 자동 실행된다.
+
+    입력: {"password": str}
+    """
+    if platform.system() != "Windows":
+        raise HTTPException(status_code=400, detail="Windows 전용 기능입니다.")
+
+    password = payload.get("password", "").strip()
+    if not password:
+        raise HTTPException(status_code=400, detail="비밀번호를 입력해주세요.")
+
+    install_dir = str(BASE_DIR)
+    agent_bat = str(BASE_DIR / "hts_agent.bat")
+    errors = []
+
+    # 1) 레지스트리 자동 로그인 설정
+    winlogon = r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
+    reg_cmds = [
+        ["reg", "add", winlogon, "/v", "AutoAdminLogon",   "/t", "REG_SZ", "/d", "1",             "/f"],
+        ["reg", "add", winlogon, "/v", "DefaultUserName",  "/t", "REG_SZ", "/d", "Administrator", "/f"],
+        ["reg", "add", winlogon, "/v", "DefaultPassword",  "/t", "REG_SZ", "/d", password,        "/f"],
+        ["reg", "add", winlogon, "/v", "DefaultDomainName","/t", "REG_SZ", "/d", ".",             "/f"],
+    ]
+    for cmd in reg_cmds:
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            errors.append(f"레지스트리 설정 실패: {r.stderr.strip()}")
+
+    # 2) MumeAgent_Startup 스케줄러 재등록 (onlogon + Administrator)
+    subprocess.run(
+        ["schtasks", "/delete", "/tn", "MumeAgent_Startup", "/f"],
+        capture_output=True
+    )
+    r = subprocess.run([
+        "schtasks", "/create",
+        "/tn", "MumeAgent_Startup",
+        "/tr", f'"{agent_bat}"',
+        "/sc", "onlogon",
+        "/ru", "Administrator",
+        "/rp", password,
+        "/rl", "highest",
+        "/f",
+    ], capture_output=True, text=True)
+    if r.returncode != 0:
+        errors.append(f"스케줄러 등록 실패: {r.stderr.strip()}")
+
+    if errors:
+        raise HTTPException(status_code=500, detail="\n".join(errors))
+
+    write_log("AUTOLOGON_SET", "configure", "자동 로그인 + 스케줄러 설정 완료")
+    return {"message": "자동시작 설정 완료. 다음 재시작부터 에이전트가 자동으로 켜집니다."}
+
+
 @app.get("/deploy-status")
 def deploy_status():
     if not DEPLOY_INFO_FILE.exists():
