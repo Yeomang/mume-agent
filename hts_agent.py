@@ -972,6 +972,7 @@ def configure_autologon(payload: dict = Body(...)):
         "/ru", "Administrator",
         "/rp", password,
         "/rl", "highest",
+        "/it",   # 대화형 세션(실제 데스크톱)에서만 실행 — 없으면 백그라운드 서비스 세션에서 실행되어 터미널/HTS GUI가 보이지 않음
         "/f",
     ], capture_output=True, text=True)
     if r.returncode != 0:
