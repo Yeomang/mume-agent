@@ -340,8 +340,11 @@ def hts_orders_from_supabase(
 
         # 최신 computed 데이터 조회
         computed, computed_updated_at = _get_latest_computed(sb, cycle_id)
-        if not _is_computed_fresh(computed_updated_at, cycle_seq, selected_user, account_index, method_ver, ticker):
-            continue
+        # 시작전 + computed 없음 = 자동재시작 직후 첫 주문 케이스 → 신선도 체크 스킵
+        is_fresh_start = cycle.get("status") == "시작전" and not computed
+        if not is_fresh_start:
+            if not _is_computed_fresh(computed_updated_at, cycle_seq, selected_user, account_index, method_ver, ticker):
+                continue
         if not computed:
             logging.info(f"사이클 #{cycle_seq}의 계산 데이터가 없습니다. 첫 주문(시작전 상태) 실행.")
 
