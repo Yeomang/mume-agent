@@ -931,58 +931,59 @@ def deploy(payload: dict = Body(...)):
 def configure_autologon(payload: dict = Body(...)):
     """
     Windows 자동 로그인 + 스케줄러 설정.
-    서버 재시작 시 Administrator로 자동 로그인되고 에이전트가 자동 실행된다.
+    서버 재시작 시 지정한 사용자로 자동 로그인되고 에이전트가 자동 실행된다.
 
-    입력: {"password": str}
+    입력: {"username": str (선택, 기본값: 현재 로그온 사용자), "password": str (선택, 비밀번호 없는 계정은 빈 문자열)}
     """
     if platform.system() != "Windows":
         raise HTTPException(status_code=400, detail="Windows 전용 기능입니다.")
 
+    import os as _os
     password = payload.get("password", "").strip()
-    if not password:
-        raise HTTPException(status_code=400, detail="비밀번호를 입력해주세요.")
+    username = payload.get("username", "").strip() or _os.environ.get("USERNAME", "Administrator")
 
-    install_dir = str(BASE_DIR)
     agent_bat = str(BASE_DIR / "hts_agent.bat")
     errors = []
 
     # 1) 레지스트리 자동 로그인 설정
     winlogon = r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
     reg_cmds = [
-        ["reg", "add", winlogon, "/v", "AutoAdminLogon",   "/t", "REG_SZ", "/d", "1",             "/f"],
-        ["reg", "add", winlogon, "/v", "DefaultUserName",  "/t", "REG_SZ", "/d", "Administrator", "/f"],
-        ["reg", "add", winlogon, "/v", "DefaultPassword",  "/t", "REG_SZ", "/d", password,        "/f"],
-        ["reg", "add", winlogon, "/v", "DefaultDomainName","/t", "REG_SZ", "/d", ".",             "/f"],
+        ["reg", "add", winlogon, "/v", "AutoAdminLogon",   "/t", "REG_SZ", "/d", "1",      "/f"],
+        ["reg", "add", winlogon, "/v", "DefaultUserName",  "/t", "REG_SZ", "/d", username, "/f"],
+        ["reg", "add", winlogon, "/v", "DefaultPassword",  "/t", "REG_SZ", "/d", password, "/f"],
+        ["reg", "add", winlogon, "/v", "DefaultDomainName","/t", "REG_SZ", "/d", ".",      "/f"],
     ]
     for cmd in reg_cmds:
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
             errors.append(f"레지스트리 설정 실패: {r.stderr.strip()}")
 
-    # 2) MumeAgent_Startup 스케줄러 재등록 (onlogon + Administrator)
+    # 2) MumeAgent_Startup 스케줄러 재등록 (onlogon + 지정 사용자)
     subprocess.run(
         ["schtasks", "/delete", "/tn", "MumeAgent_Startup", "/f"],
         capture_output=True
     )
-    r = subprocess.run([
+    schtasks_cmd = [
         "schtasks", "/create",
         "/tn", "MumeAgent_Startup",
         "/tr", f'"{agent_bat}"',
         "/sc", "onlogon",
-        "/ru", "Administrator",
-        "/rp", password,
+        "/ru", username,
         "/rl", "highest",
         "/it",   # 대화형 세션(실제 데스크톱)에서만 실행 — 없으면 백그라운드 서비스 세션에서 실행되어 터미널/HTS GUI가 보이지 않음
         "/f",
-    ], capture_output=True, text=True)
+    ]
+    if password:
+        schtasks_cmd.extend(["/rp", password])
+    r = subprocess.run(schtasks_cmd, capture_output=True, text=True)
     if r.returncode != 0:
         errors.append(f"스케줄러 등록 실패: {r.stderr.strip()}")
 
     if errors:
         raise HTTPException(status_code=500, detail="\n".join(errors))
 
-    write_log("AUTOLOGON_SET", "configure", "자동 로그인 + 스케줄러 설정 완료")
-    return {"message": "자동시작 설정 완료. 다음 재시작부터 에이전트가 자동으로 켜집니다."}
+    write_log("AUTOLOGON_SET", "configure", f"자동 로그인 + 스케줄러 설정 완료 (user={username})")
+    return {"message": f"자동시작 설정 완료. 다음 재시작부터 [{username}] 계정으로 자동 로그인되고 에이전트가 켜집니다."}
 
 
 @app.delete("/configure-autologon")
