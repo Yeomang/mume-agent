@@ -131,6 +131,11 @@ def hts_orders_aftermarket(
 
         # 1회 매수금액 계산
         computed, computed_updated_at = _get_latest_computed(sb, cycle_id)
+        # 시작전 + computed 없음 = 자동재시작 직후 첫 주문 케이스 → aftermarket 불필요
+        is_fresh_start = cycle.get("status") == "시작전" and not computed
+        if is_fresh_start:
+            logging.info(f"사이클 #{cycle_seq}: 시작전 + computed 없음 → aftermarket 건너뜀")
+            continue
         if not _is_computed_fresh(computed_updated_at, cycle_seq, selected_user, account_index, method_ver, ticker):
             continue
         if method_ver == "V2.2":
