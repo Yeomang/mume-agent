@@ -21,6 +21,7 @@ from hts_orders_history_save_to_csv import save_orders_history
 from order_history_data_preprocessing import order_history_data_preprocessing
 import datetime as _dt
 from datetime import timezone as _tz, timedelta as _td
+import pandas_market_calendars as _mcal
 
 
 
@@ -147,8 +148,31 @@ def _get_latest_computed(sb, cycle_id):
     return computed, updated_at
 
 
+def _last_nyse_close_utc() -> _dt.datetime:
+    """이미 지난 가장 최근 NYSE 장 마감 시각(UTC)을 반환한다.
+    오늘이 거래일이더라도 아직 마감 전이면 전일(또는 그 이전) 마감을 반환한다.
+    """
+    cal = _mcal.get_calendar("NYSE")
+    now_utc = _dt.datetime.now(_tz.utc)
+    today = now_utc.date()
+    start = (today - _td(days=14)).isoformat()
+    end = today.isoformat()
+    sched = cal.schedule(start_date=start, end_date=end)
+    if sched.empty:
+        return now_utc - _td(days=5)
+    # 마감 시각이 현재보다 과거인 행만 필터 → 가장 최근 마감
+    for ts in reversed(sched["market_close"].tolist()):
+        close = ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts
+        if close.tzinfo is None:
+            close = close.replace(tzinfo=_tz.utc)
+        if close <= now_utc:
+            return close
+    return now_utc - _td(days=5)
+
+
 def _is_computed_fresh(updated_at_str, cycle_seq, selected_user, account_index, method_ver, ticker):
-    """computed가 72시간 이내에 업데이트됐는지 확인. 오래됐으면 텔레그램 경고 후 False 반환."""
+    """computed가 직전 NYSE 개장일 마감 이후에 업데이트됐는지 확인.
+    주말·공휴일로 인해 경과 시간이 길어져도 마지막 거래일 기준이면 정상 처리."""
     if updated_at_str is None:
         msg = (
             f"⚠️ *[무매사이클 #{cycle_seq}] 주문 건너뜀*\n\n"
@@ -164,17 +188,19 @@ def _is_computed_fresh(updated_at_str, cycle_seq, selected_user, account_index, 
         updated_at = _dt.datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
         if updated_at.tzinfo is None:
             updated_at = updated_at.replace(tzinfo=_tz.utc)
-        elapsed = _dt.datetime.now(_tz.utc) - updated_at
-        if elapsed > _td(hours=72):
-            hours = int(elapsed.total_seconds() / 3600)
+
+        # 직전 NYSE 개장일 마감 이후에 업데이트됐으면 신선한 것으로 판정
+        last_close = _last_nyse_close_utc()
+        if updated_at < last_close:
+            hours = int((_dt.datetime.now(_tz.utc) - updated_at).total_seconds() / 3600)
             msg = (
                 f"⚠️ *[무매사이클 #{cycle_seq}] 주문 건너뜀*\n\n"
                 f"▶ 계좌: {selected_user} | {account_index}번째 계좌\n"
                 f"▶ 종목: {ticker} ({method_ver})\n"
-                f"▶ 사유: 계산 데이터가 {hours}시간 전 기준 (72시간 초과)\n"
+                f"▶ 사유: 계산 데이터가 직전 NYSE 개장일 마감({last_close.strftime('%m/%d %H:%MUTC')}) 이전 기준\n"
                 f"▶ 아침 체결수집(Morning)을 수동 실행 후 재시도해주세요."
             )
-            logging.warning(f"사이클 #{cycle_seq}: computed {hours}시간 전 업데이트 (72시간 초과) → 주문 건너뜀")
+            logging.warning(f"사이클 #{cycle_seq}: computed {hours}시간 전 업데이트, 직전 NYSE 마감({last_close}) 이전 → 주문 건너뜀")
             send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, msg)
             return False
     except Exception as e:
