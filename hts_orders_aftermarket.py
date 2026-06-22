@@ -136,7 +136,7 @@ def hts_orders_aftermarket(
         if is_fresh_start:
             logging.info(f"사이클 #{cycle_seq}: 시작전 + computed 없음 → aftermarket 건너뜀")
             continue
-        if not _is_computed_fresh(computed_updated_at, cycle_seq, selected_user, account_index, method_ver, ticker):
+        if not _is_computed_fresh(computed_updated_at, cycle_seq, selected_user, account_index, method_ver, ticker, for_aftermarket=True):
             continue
         if method_ver == "V2.2":
             principal = cycle.get("principal", 0)

@@ -148,9 +148,14 @@ def _get_latest_computed(sb, cycle_id):
     return computed, updated_at
 
 
-def _last_nyse_close_utc() -> _dt.datetime:
-    """이미 지난 가장 최근 NYSE 장 마감 시각(UTC)을 반환한다.
-    오늘이 거래일이더라도 아직 마감 전이면 전일(또는 그 이전) 마감을 반환한다.
+def _last_nyse_close_utc(prev: bool = False) -> _dt.datetime:
+    """이미 지난 NYSE 장 마감 시각(UTC)을 반환한다.
+
+    prev=False (기본): 가장 최근 마감 — 모닝 주문용 (장 시작 전 실행)
+    prev=True:        그 이전 마감 — 애프터마켓 주문용 (장 마감 후 실행)
+                      이유: 애프터마켓은 오늘 마감 이후 실행되므로
+                            '오늘 마감'을 기준으로 쓰면 오늘 아침에 수집한
+                            데이터(마감 전)가 항상 차단되는 문제 발생
     """
     cal = _mcal.get_calendar("NYSE")
     now_utc = _dt.datetime.now(_tz.utc)
@@ -160,19 +165,29 @@ def _last_nyse_close_utc() -> _dt.datetime:
     sched = cal.schedule(start_date=start, end_date=end)
     if sched.empty:
         return now_utc - _td(days=5)
-    # 마감 시각이 현재보다 과거인 행만 필터 → 가장 최근 마감
-    for ts in reversed(sched["market_close"].tolist()):
+    # 마감 시각이 현재보다 과거인 항목만 수집
+    passed = []
+    for ts in sched["market_close"].tolist():
         close = ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts
         if close.tzinfo is None:
             close = close.replace(tzinfo=_tz.utc)
         if close <= now_utc:
-            return close
-    return now_utc - _td(days=5)
+            passed.append(close)
+    if not passed:
+        return now_utc - _td(days=5)
+    if prev and len(passed) >= 2:
+        return passed[-2]
+    return passed[-1]
 
 
-def _is_computed_fresh(updated_at_str, cycle_seq, selected_user, account_index, method_ver, ticker):
-    """computed가 직전 NYSE 개장일 마감 이후에 업데이트됐는지 확인.
-    주말·공휴일로 인해 경과 시간이 길어져도 마지막 거래일 기준이면 정상 처리."""
+def _is_computed_fresh(updated_at_str, cycle_seq, selected_user, account_index, method_ver, ticker, for_aftermarket: bool = False):
+    """computed가 기준 NYSE 마감 이후에 업데이트됐는지 확인.
+
+    for_aftermarket=False (기본, 모닝 주문): 가장 최근 마감 기준
+    for_aftermarket=True  (애프터마켓 주문): 그 이전 마감 기준
+      → 애프터마켓은 장 마감 후 실행되므로, '오늘 마감'이 아닌
+        '전일 마감' 이후에 오늘 아침 수집이 됐는지를 확인해야 함
+    """
     if updated_at_str is None:
         msg = (
             f"⚠️ *[무매사이클 #{cycle_seq}] 주문 건너뜀*\n\n"
@@ -189,8 +204,8 @@ def _is_computed_fresh(updated_at_str, cycle_seq, selected_user, account_index, 
         if updated_at.tzinfo is None:
             updated_at = updated_at.replace(tzinfo=_tz.utc)
 
-        # 직전 NYSE 개장일 마감 이후에 업데이트됐으면 신선한 것으로 판정
-        last_close = _last_nyse_close_utc()
+        # 기준 마감 이후에 업데이트됐으면 유효한 것으로 판정
+        last_close = _last_nyse_close_utc(prev=for_aftermarket)
         if updated_at < last_close:
             hours = int((_dt.datetime.now(_tz.utc) - updated_at).total_seconds() / 3600)
             msg = (
