@@ -180,13 +180,12 @@ def _last_nyse_close_utc(prev: bool = False) -> _dt.datetime:
     return passed[-1]
 
 
-def _is_computed_fresh(updated_at_str, cycle_seq, selected_user, account_index, method_ver, ticker, for_aftermarket: bool = False):
+def _is_computed_fresh(updated_at_str, cycle_seq, selected_user, account_index, method_ver, ticker):
     """computed가 기준 NYSE 마감 이후에 업데이트됐는지 확인.
 
-    for_aftermarket=False (기본, 모닝 주문): 가장 최근 마감 기준
-    for_aftermarket=True  (애프터마켓 주문): 그 이전 마감 기준
-      → 애프터마켓은 장 마감 후 실행되므로, '오늘 마감'이 아닌
-        '전일 마감' 이후에 오늘 아침 수집이 됐는지를 확인해야 함
+    기준: 직전 이전 마감(passed[-2])을 사용.
+    → 체결이 없으면 morning이 정상 실행돼도 computed를 갱신하지 않으므로,
+      2거래일 연속 미갱신까지는 허용, 3거래일 이상이면 차단.
     """
     if updated_at_str is None:
         msg = (
@@ -200,22 +199,26 @@ def _is_computed_fresh(updated_at_str, cycle_seq, selected_user, account_index, 
         send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, msg)
         return False
     try:
-        updated_at = _dt.datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
+        import re as _re
+        s = updated_at_str.replace("Z", "+00:00")
+        # 소수점 마이크로초를 6자리로 정규화 (5자리 등 비표준 방어)
+        s = _re.sub(r'\.(\d+)', lambda m: '.' + (m.group(1) + '000000')[:6], s)
+        updated_at = _dt.datetime.fromisoformat(s)
         if updated_at.tzinfo is None:
             updated_at = updated_at.replace(tzinfo=_tz.utc)
 
-        # 기준 마감 이후에 업데이트됐으면 유효한 것으로 판정
-        last_close = _last_nyse_close_utc(prev=for_aftermarket)
+        # 직전 이전 마감 이후에 업데이트됐으면 유효한 것으로 판정
+        last_close = _last_nyse_close_utc(prev=True)
         if updated_at < last_close:
             hours = int((_dt.datetime.now(_tz.utc) - updated_at).total_seconds() / 3600)
             msg = (
                 f"⚠️ *[무매사이클 #{cycle_seq}] 주문 건너뜀*\n\n"
                 f"▶ 계좌: {selected_user} | {account_index}번째 계좌\n"
                 f"▶ 종목: {ticker} ({method_ver})\n"
-                f"▶ 사유: 계산 데이터가 직전 NYSE 개장일 마감({last_close.strftime('%m/%d %H:%MUTC')}) 이전 기준\n"
+                f"▶ 사유: 계산 데이터가 {last_close.strftime('%m/%d %H:%MUTC')} 이전 기준 (2거래일 이상 미갱신)\n"
                 f"▶ 아침 체결수집(Morning)을 수동 실행 후 재시도해주세요."
             )
-            logging.warning(f"사이클 #{cycle_seq}: computed {hours}시간 전 업데이트, 직전 NYSE 마감({last_close}) 이전 → 주문 건너뜀")
+            logging.warning(f"사이클 #{cycle_seq}: computed {hours}시간 전 업데이트, 기준 마감({last_close}) 이전 → 주문 건너뜀")
             send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, msg)
             return False
     except Exception as e:
