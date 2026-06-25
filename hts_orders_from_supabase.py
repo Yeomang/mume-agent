@@ -21,7 +21,6 @@ from hts_orders_history_save_to_csv import save_orders_history
 from order_history_data_preprocessing import order_history_data_preprocessing
 import datetime as _dt
 from datetime import timezone as _tz, timedelta as _td
-import pandas_market_calendars as _mcal
 
 
 
@@ -148,44 +147,13 @@ def _get_latest_computed(sb, cycle_id):
     return computed, updated_at
 
 
-def _last_nyse_close_utc(prev: bool = False) -> _dt.datetime:
-    """이미 지난 NYSE 장 마감 시각(UTC)을 반환한다.
-
-    prev=False (기본): 가장 최근 마감 — 모닝 주문용 (장 시작 전 실행)
-    prev=True:        그 이전 마감 — 애프터마켓 주문용 (장 마감 후 실행)
-                      이유: 애프터마켓은 오늘 마감 이후 실행되므로
-                            '오늘 마감'을 기준으로 쓰면 오늘 아침에 수집한
-                            데이터(마감 전)가 항상 차단되는 문제 발생
-    """
-    cal = _mcal.get_calendar("NYSE")
-    now_utc = _dt.datetime.now(_tz.utc)
-    today = now_utc.date()
-    start = (today - _td(days=14)).isoformat()
-    end = today.isoformat()
-    sched = cal.schedule(start_date=start, end_date=end)
-    if sched.empty:
-        return now_utc - _td(days=5)
-    # 마감 시각이 현재보다 과거인 항목만 수집
-    passed = []
-    for ts in sched["market_close"].tolist():
-        close = ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts
-        if close.tzinfo is None:
-            close = close.replace(tzinfo=_tz.utc)
-        if close <= now_utc:
-            passed.append(close)
-    if not passed:
-        return now_utc - _td(days=5)
-    if prev and len(passed) >= 2:
-        return passed[-2]
-    return passed[-1]
-
 
 def _is_computed_fresh(updated_at_str, cycle_seq, selected_user, account_index, method_ver, ticker):
-    """computed가 기준 NYSE 마감 이후에 업데이트됐는지 확인.
+    """computed 데이터가 주문 가능한 상태인지 확인.
 
-    기준: 직전 이전 마감(passed[-2])을 사용.
-    → 체결이 없으면 morning이 정상 실행돼도 computed를 갱신하지 않으므로,
-      2거래일 연속 미갱신까지는 허용, 3거래일 이상이면 차단.
+    computed 이력이 아예 없는 경우(None)만 차단.
+    시간 기반 신선도 체크 없음 — 체결이 없어도 계획은 유효하며,
+    중복 주문은 별도 HTS CSV 기반 방지 로직에서 처리.
     """
     if updated_at_str is None:
         msg = (
@@ -198,31 +166,6 @@ def _is_computed_fresh(updated_at_str, cycle_seq, selected_user, account_index, 
         logging.warning(f"사이클 #{cycle_seq}: computed 이력 없음 → 주문 건너뜀")
         send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, msg)
         return False
-    try:
-        import re as _re
-        s = updated_at_str.replace("Z", "+00:00")
-        # 소수점 마이크로초를 6자리로 정규화 (5자리 등 비표준 방어)
-        s = _re.sub(r'\.(\d+)', lambda m: '.' + (m.group(1) + '000000')[:6], s)
-        updated_at = _dt.datetime.fromisoformat(s)
-        if updated_at.tzinfo is None:
-            updated_at = updated_at.replace(tzinfo=_tz.utc)
-
-        # 직전 이전 마감 이후에 업데이트됐으면 유효한 것으로 판정
-        last_close = _last_nyse_close_utc(prev=True)
-        if updated_at < last_close:
-            hours = int((_dt.datetime.now(_tz.utc) - updated_at).total_seconds() / 3600)
-            msg = (
-                f"⚠️ *[무매사이클 #{cycle_seq}] 주문 건너뜀*\n\n"
-                f"▶ 계좌: {selected_user} | {account_index}번째 계좌\n"
-                f"▶ 종목: {ticker} ({method_ver})\n"
-                f"▶ 사유: 계산 데이터가 {last_close.strftime('%m/%d %H:%MUTC')} 이전 기준 (2거래일 이상 미갱신)\n"
-                f"▶ 아침 체결수집(Morning)을 수동 실행 후 재시도해주세요."
-            )
-            logging.warning(f"사이클 #{cycle_seq}: computed {hours}시간 전 업데이트, 기준 마감({last_close}) 이전 → 주문 건너뜀")
-            send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, msg)
-            return False
-    except Exception as e:
-        logging.warning(f"사이클 #{cycle_seq}: computed updated_at 파싱 실패 ({e}) → 주문 진행")
     return True
 
 
