@@ -157,6 +157,12 @@ def run_cancel_orders_job(is_test_mode: bool = False, manual: bool = False):
             elif success:
                 logging.info(f"[{user} | {account_index}번 계좌] 미체결 주문 일괄 취소 성공")
                 results.append(f"✅ {user} | {account_index}번 계좌: 취소 완료")
+                # 주문내역 processed CSV 삭제 — 재실행 시 중복 방지 오탐 방지
+                # (저장된 CSV에 취소 전 주문이 남아 있으면 evening 재실행 시 중복으로 스킵됨)
+                csv_path = BASE_DIR / "data" / "order_history_processed" / f"order_history_processed_{user}_{account_index}.csv"
+                if csv_path.exists():
+                    csv_path.unlink()
+                    logging.info(f"[중복방지] 주문취소 후 주문내역 CSV 초기화: {csv_path.name}")
             else:
                 logging.error(f"[{user} | {account_index}번 계좌] 미체결 주문 일괄 취소 실패: {error}")
                 results.append(f"❌ {user} | {account_index}번 계좌: 실패 - {error}")

@@ -35,8 +35,6 @@ install_log_context_filter()
 from hts_login import hts_login
 from hts_stock_balance_save_to_csv import save_data_stock_balance
 from stock_balance_data_preprocessing import stock_balance_data_preprocessing
-from hts_orders_history_save_to_csv import save_orders_history
-from order_history_data_preprocessing import order_history_data_preprocessing
 from hts_orders_from_supabase import hts_orders_from_supabase
 from utils import kill_window_by_title
 from job_control import register_job_pid, unregister_job_pid
@@ -404,10 +402,6 @@ def run_evening_job(is_test_mode: bool = False, manual: bool = False):
 
             # 예수금 부족 여부 사전 체크 (부족 시 텔레그램 경고)
             _check_cash_sufficiency(user, account_index)
-
-            # 당일 주문내역 CSV 갱신 — 취소 후 재실행 시 취소된 주문이 중복으로 판단되는 문제 방지
-            save_orders_history(user, account_index)
-            order_history_data_preprocessing(user, account_index)
 
             # Supabase에서 주문 데이터 읽어 매도/매수 실행 (사이클 레벨)
             hts_orders_from_supabase(
