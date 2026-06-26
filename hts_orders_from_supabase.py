@@ -524,29 +524,27 @@ def hts_orders_from_supabase(
                 sell_orders, buy_orders, ticker
             )
 
-        # 중복 주문 방지: HTS 실제 주문내역 CSV 기반으로 판단
-        # 기존 order_status DB 체크는 매도만 성공하고 매수 실패 시에도 스킵하는 문제가 있었음.
-        # 개선: HTS CSV에서 해당 종목의 당일 매도/매수 존재 여부를 각각 확인하여
-        # 이미 들어간 쪽만 스킵하고, 누락된 쪽은 실행.
+        # 중복 주문 방지: HTS 실제 주문내역 CSV + PID 세션 태그 기반으로 판단
+        # PID 세션 태그 방식: 주문 완료 후 현재 프로세스 PID를 태그 파일에 기록.
+        # 중복체크 시 태그 PID == 현재 PID 일 때만 CSV를 읽음.
+        # → 다른 날/다른 프로세스의 CSV는 자동으로 무시됨 (mtime 타임존 이슈 완전 제거)
+        # → cancel_orders가 태그 파일만 삭제하면 다음 재실행은 fresh start
         skip_sell = False
         skip_buy = False
         if not is_test_mode:
             try:
-                csv_path = f'./data/order_history_processed/order_history_processed_{selected_user}_{account_index}.csv'
-                _csv_df = None
-                # CSV 파일의 수정 시각이 오늘(ET 기준)인지 확인
-                # 이전 거래일의 CSV가 남아있으면 오늘 주문으로 오인하는 버그 방지
                 import os as _os
-                if _os.path.exists(csv_path):
-                    from zoneinfo import ZoneInfo
-                    from datetime import datetime as _dt
-                    _mtime = _os.path.getmtime(csv_path)
-                    _mtime_et = _dt.fromtimestamp(_mtime, tz=ZoneInfo("America/New_York"))
-                    _today_et = _dt.now(ZoneInfo("America/New_York"))
-                    if _mtime_et.date() == _today_et.date():
+                _current_pid = str(_os.getpid())
+                csv_path = f'./data/order_history_processed/order_history_processed_{selected_user}_{account_index}.csv'
+                pid_path = f'./data/order_history_processed/order_session_{selected_user}_{account_index}.pid'
+                _csv_df = None
+                if _os.path.exists(pid_path) and _os.path.exists(csv_path):
+                    with open(pid_path) as _pf:
+                        _saved_pid = _pf.read().strip()
+                    if _saved_pid == _current_pid:
                         _csv_df = load_csv_if_exists(csv_path)
                     else:
-                        logging.info(f"[중복방지] 주문내역 CSV가 이전 거래일({_mtime_et.date()}) 것이므로 무시. 오늘({_today_et.date()}) 기준으로 새로 실행.")
+                        logging.info(f"[중복방지] 세션 PID 불일치 ({_saved_pid} → {_current_pid}). 이전 세션 CSV 무시, 새로 실행.")
                 if _csv_df is not None and not _csv_df.empty:
                     _ticker_df = _csv_df[_csv_df['종목코드'] == ticker]
                     if not _ticker_df.empty:
@@ -607,6 +605,11 @@ def hts_orders_from_supabase(
         if not is_test_mode:
             save_orders_history(selected_user, account_index)
             order_history_data_preprocessing(selected_user, account_index)
+            # 주문 완료 후 현재 PID를 세션 태그 파일에 기록 (중복방지용)
+            import os as _os2
+            _pid_path = f'./data/order_history_processed/order_session_{selected_user}_{account_index}.pid'
+            with open(_pid_path, 'w') as _pf:
+                _pf.write(str(_os2.getpid()))
             file_path = f'./data/order_history_processed/order_history_processed_{selected_user}_{account_index}.csv'
             df_order_history = load_csv_if_exists(file_path)
             if df_order_history is None or df_order_history.empty:
