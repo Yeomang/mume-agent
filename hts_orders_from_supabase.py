@@ -17,7 +17,7 @@ import logging
 import traceback
 import httpx
 import yfinance as yf
-from hts_orders_history_save_to_csv import save_orders_history
+from hts_orders_history_save_to_csv import save_orders_history, get_unfilled_tickers_dict
 from order_history_data_preprocessing import order_history_data_preprocessing
 import datetime as _dt
 from datetime import timezone as _tz, timedelta as _td
@@ -313,19 +313,15 @@ def hts_orders_from_supabase(
     active_cycles = _get_active_cycles(sb, selected_user, account_index, cycles=cycles)
     logging.info(f"| 사용자 '{selected_user}' | HTS계좌순번 '{account_index}' | 활성 사이클: {[c['cycle_seq'] for c in active_cycles]}")
 
-    # 주문 실행 전: 이전 CSV 삭제 후 HTS 최신 주문내역 수집 (중복방지 기준선)
-    # CSV 먼저 삭제 → 수집 실패해도 이전 버전 CSV로 오탐 없음
+    # 중복 방지: 미체결 탭에서 현재 주문 상태 조회
+    # Day Order은 US 장 종료 시 자동 소멸 → 다음 날 미체결 탭에서 사라짐 → 오탐 없음
+    _unfilled_dict = {}
     if not is_test_mode:
-        import os as _pre_os
-        _pre_csv_path = f'./data/order_history_processed/order_history_processed_{selected_user}_{account_index}.csv'
-        if _pre_os.path.exists(_pre_csv_path):
-            _pre_os.remove(_pre_csv_path)
         try:
-            save_orders_history(selected_user, account_index)
-            order_history_data_preprocessing(selected_user, account_index)
-            logging.info("[중복방지] HTS 최신 주문내역 수집 완료")
+            _unfilled_dict = get_unfilled_tickers_dict(selected_user, account_index)
+            logging.info(f"[중복방지] 미체결 조회 완료: {list(_unfilled_dict.keys())}")
         except Exception as e:
-            logging.warning(f"[중복방지] HTS 주문내역 사전 수집 실패 (중복체크 스킵): {e}")
+            logging.warning(f"[중복방지] 미체결 조회 실패 (중복체크 스킵): {e}")
 
     for iternum, cycle in enumerate(active_cycles, start=1):
         cycle_id = cycle["id"]
@@ -538,30 +534,23 @@ def hts_orders_from_supabase(
                 sell_orders, buy_orders, ticker
             )
 
-        # 중복 주문 방지: 루프 전 수집한 HTS 최신 주문내역 기반으로 판단
-        # Day Order이므로 전날 주문은 US 장 마감 시 자동 소멸 → 다음 날 내역 없음
+        # 중복 주문 방지: 루프 전 조회한 미체결 주문 기반으로 판단
         skip_sell = False
         skip_buy = False
-        if not is_test_mode:
-            try:
-                _csv_path = f'./data/order_history_processed/order_history_processed_{selected_user}_{account_index}.csv'
-                _csv_df = load_csv_if_exists(_csv_path)
-                if _csv_df is not None and not _csv_df.empty:
-                    _ticker_df = _csv_df[_csv_df['종목코드'] == ticker]
-                    if not _ticker_df.empty:
-                        _has_sell = len(_ticker_df[_ticker_df['매매구분'].str.contains('매도', na=False)]) > 0
-                        _has_buy = len(_ticker_df[_ticker_df['매매구분'].str.contains('매수', na=False)]) > 0
-                        if _has_sell and _has_buy:
-                            logging.info(f"[중복방지] 사이클 #{cycle_seq}: HTS 주문내역에 매도+매수 모두 존재. 전체 스킵.")
-                            continue
-                        if _has_sell:
-                            logging.info(f"[중복방지] 사이클 #{cycle_seq}: HTS 주문내역에 매도만 존재. 매도 스킵, 매수만 실행.")
-                            skip_sell = True
-                        if _has_buy:
-                            logging.info(f"[중복방지] 사이클 #{cycle_seq}: HTS 주문내역에 매수만 존재. 매수 스킵, 매도만 실행.")
-                            skip_buy = True
-            except Exception as e:
-                logging.warning(f"[중복방지] HTS 주문내역 확인 실패 (무시하고 진행): {e}")
+        if not is_test_mode and _unfilled_dict:
+            _ticker_orders = _unfilled_dict.get(ticker, {})
+            if _ticker_orders:
+                _has_sell = _ticker_orders.get("sell", False)
+                _has_buy = _ticker_orders.get("buy", False)
+                if _has_sell and _has_buy:
+                    logging.info(f"[중복방지] 사이클 #{cycle_seq}: 미체결에 매도+매수 모두 존재. 전체 스킵.")
+                    continue
+                if _has_sell:
+                    logging.info(f"[중복방지] 사이클 #{cycle_seq}: 미체결에 매도만 존재. 매도 스킵, 매수만 실행.")
+                    skip_sell = True
+                if _has_buy:
+                    logging.info(f"[중복방지] 사이클 #{cycle_seq}: 미체결에 매수만 존재. 매수 스킵, 매도만 실행.")
+                    skip_buy = True
 
         if sell_orders and not skip_sell:
             sell_success, sell_err = hts_order_sell(selected_user, account_index, ticker, sell_orders, is_test_mode)

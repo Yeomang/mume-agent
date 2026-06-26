@@ -17,6 +17,8 @@ CTRL_INDEX_DROPDOWN_ACCOUNT = 2  # order_window 하위 컨트롤 검색결과 �
 AUTO_ID_PASSWORD_DIALOG_OK_BUTTON = "2"  # 비밀번호 입력 안내창 확인 버튼 automation_id
 AUTO_ID_TABLE_ORDER = "3795"  # 주문체결 탭 아래 표 영역 automation_id
 CTRL_INDEX_TABLE_ORDER = 2  # order_window 하위 컨트롤 검색결과 주문체결 탭 아래 표 영역 순번
+AUTO_ID_BOTTOM_TAB = "3785"  # 하단 탭 컨트롤 (미체결/주문체결/주문가능)
+AUTO_ID_UNFILLED_GRID = "3780"  # 미체결 그리드 Pane
 
 
 # main_window 하위의 모든 자식 및 자손 GUI 요소의 정보를 출력
@@ -130,6 +132,130 @@ def save_orders_history(selected_user, account_index):
     logging.info("'해외주식 주문' 창을 닫았습니다.")
 
     logging.info(">>>>> HTS 해외주식 주문 내역 데이터 csv파일로 저장하기 완료! <<<<<")
+
+
+def get_unfilled_tickers_dict(selected_user, account_index) -> dict:
+    """
+    미체결 탭에서 현재 미체결 주문을 조회하여 종목별 매도/매수 여부를 반환.
+    반환: {"TQQQ": {"sell": True, "buy": True}, ...}
+    미체결 없음 또는 실패 시 빈 dict 반환.
+    Day Order은 US 장 종료 시 자동 소멸하므로 다음 날에는 미체결 탭에서 사라짐.
+    """
+    logging.info(">>>>> 미체결 주문 조회 시작 <<<<<")
+    order_window = None
+    block_input(True)
+    try:
+        password = get_account_password(selected_user)
+        hwnd = get_window_handle("iMeritz")
+        setup_window(hwnd)
+        app = Application(backend="uia").connect(handle=hwnd)
+        main_window = app.window(handle=hwnd)
+
+        search_input = find_control_by_criteria(main_window, "Edit", automation_id=AUTO_ID_SCREEN_SEARCH_INPUT)
+        set_focus_and_type(search_input, SCREEN_NUM_ORDER)
+
+        order_window = find_control_by_criteria(main_window, "Window", title="[06100] 해외주식 주문", delay=2, retries=5)
+        if not order_window:
+            raise Exception("[06100] 해외주식 주문 창을 찾을 수 없습니다.")
+
+        dropdown = find_control_by_criteria(order_window, "Pane", automation_id=AUTO_ID_DROPDOWN_ACCOUNT, index=CTRL_INDEX_DROPDOWN_ACCOUNT)
+        if not dropdown:
+            raise Exception("계좌 드롭다운을 찾을 수 없습니다.")
+        dropdown.click_input()
+        send_keys(f"{{PGUP}}{{DOWN {account_index}}}{{ENTER}}")
+
+        _handle_password_dialog(main_window, password)
+
+        tab_unfilled = find_control_by_criteria(main_window, "TabItem", title="미체결")
+        if not tab_unfilled:
+            raise Exception("미체결 탭을 찾을 수 없습니다.")
+        tab_unfilled.click_input()
+        time.sleep(2)
+
+        bottom_tab = find_control_by_criteria(order_window, "Tab", automation_id=AUTO_ID_BOTTOM_TAB)
+        if not bottom_tab:
+            raise Exception("하단 탭 컨트롤을 찾을 수 없습니다.")
+
+        grid = find_control_by_criteria(bottom_tab, "Pane", automation_id=AUTO_ID_UNFILLED_GRID, silent=True)
+        if not grid:
+            logging.info("[중복방지] 미체결 그리드 없음 — 미체결 주문 없음으로 처리.")
+            order_window.close()
+            return {}
+
+        grid_rect = grid.rectangle()
+        x = int(grid_rect.left + (grid_rect.right - grid_rect.left) / 2)
+        y = int(grid_rect.top + 25)
+        click(button="right", coords=(x, y))
+        time.sleep(1)
+        send_keys("{DOWN 6}{ENTER}")
+        time.sleep(0.5)
+        send_keys("c")
+        time.sleep(1)
+
+        save_dir = Path("./data/unfilled_orders_raw")
+        save_dir.mkdir(parents=True, exist_ok=True)
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        save_path = Path(current_dir) / "data" / "unfilled_orders_raw" / f"unfilled_orders_{selected_user}_{account_index}.csv"
+
+        try:
+            wait_for_window("다른 이름으로 저장", main_window, "다른 이름으로 저장", "Window", timeout=5)
+        except Exception:
+            logging.info("[중복방지] '다른 이름으로 저장' 창 없음 — 미체결 주문 없음으로 처리.")
+            send_keys("{ESCAPE}")
+            order_window.close()
+            return {}
+
+        copy_to_clipboard(str(save_path))
+        send_keys("%n")
+        send_keys("^v{ENTER}")
+        time.sleep(1)
+
+        order_window.close()
+        logging.info(f"[중복방지] 미체결 CSV 저장: {save_path}")
+
+        if not save_path.exists():
+            logging.info("[중복방지] 미체결 CSV 파일 없음.")
+            return {}
+
+        result = {}
+        df = None
+        for enc in ['utf-8-sig', 'cp949', 'cp1252', 'utf-16']:
+            try:
+                import pandas as pd
+                df = pd.read_csv(save_path, encoding=enc)
+                break
+            except Exception:
+                continue
+        if df is None or df.empty:
+            logging.info("[중복방지] 미체결 CSV 파싱 실패 또는 빈 파일.")
+            return {}
+
+        if '종목코드' not in df.columns or '매매구분' not in df.columns:
+            logging.info(f"[중복방지] 미체결 CSV 컬럼 없음: {list(df.columns)}")
+            return {}
+
+        df['종목코드'] = df['종목코드'].astype(str).str.replace(r'\.\w+$', '', regex=True).str.strip()
+        for _, row in df.iterrows():
+            code = str(row.get('종목코드', '')).strip()
+            gubun = str(row.get('매매구분', '')).strip()
+            if not code or code == 'nan':
+                continue
+            if code not in result:
+                result[code] = {"sell": False, "buy": False}
+            if '매도' in gubun:
+                result[code]["sell"] = True
+            elif '매수' in gubun:
+                result[code]["buy"] = True
+
+        logging.info(f"[중복방지] 미체결 주문 조회 완료: {result}")
+        return result
+
+    except Exception as e:
+        logging.warning(f"[중복방지] 미체결 주문 조회 실패 (중복체크 스킵): {e}")
+        return {}
+    finally:
+        block_input(False)
+        logging.info(">>>>> 미체결 주문 조회 완료 <<<<<")
 
 
 if __name__ == "__main__":
