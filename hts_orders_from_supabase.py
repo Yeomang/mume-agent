@@ -114,6 +114,47 @@ def _record_order_status(cycle_id: int, orders: list):
         logging.warning(f"[order-status] 기록 실패: {e}")
 
 
+def _trigger_recompute_with_live_price(cycle_id: int, ticker: str):
+    """저녁 매수주문 직전, 프리장 실시간가로 콘솔 recompute를 재트리거한다.
+
+    아침 recompute 때 박힌 current_price는 정규장 종가에 고정돼 있어
+    저녁 주문 시점(프리장)의 실제 가격과 크게 어긋날 수 있다 (특히 3배 레버리지 ETF).
+    큰수매수가(dip_buy_price)가 실시간가를 반영해야 평단LOC/별%LOC 매수가
+    현재가와 너무 벌어져 주문거부되는 것을 안전장치가 제대로 막아낸다.
+
+    가격 조회나 recompute 호출이 실패해도 조용히 넘어가 기존 computed를 그대로 쓴다
+    (저녁 job 전체가 이 단계 때문에 중단되면 안 됨).
+    """
+    live_price = None
+    try:
+        info = yf.Ticker(ticker).info
+        live_price = info.get("preMarketPrice") or info.get("regularMarketPrice")
+    except Exception as e:
+        logging.warning(f"[recompute] {ticker} 실시간가 조회 실패, 기존 computed 사용: {e}")
+        return
+
+    if not live_price or float(live_price) <= 0:
+        logging.info(f"[recompute] {ticker} 실시간가 없음 → recompute 재트리거 스킵, 기존 computed 사용")
+        return
+
+    console_url = Config.CONSOLE_URL.rstrip("/") if Config.CONSOLE_URL else ""
+    agent_key = Config.HTS_AGENT_KEY
+    if not console_url:
+        return
+    headers = {"X-Agent-Key": agent_key} if agent_key else {}
+    try:
+        resp = httpx.post(
+            f"{console_url}/recompute/{cycle_id}",
+            params={"current_price": float(live_price)},
+            headers=headers,
+            timeout=60.0,
+        )
+        resp.raise_for_status()
+        logging.info(f"[recompute] 사이클 {cycle_id} 실시간가(${live_price}) 기준 재계산 완료")
+    except Exception as e:
+        logging.warning(f"[recompute] 사이클 {cycle_id} 실시간가 재계산 실패, 기존 computed 사용: {e}")
+
+
 def _get_latest_computed(sb, cycle_id):
     """cycle_trades_latest에서 최신 computed JSON 조회, cycle_trades에서 갱신 시각 조회.
 
@@ -334,6 +375,10 @@ def hts_orders_from_supabase(
         logging.info(f">>>>> 사이클 #{cycle_seq} 매도/매수 진행중... ({len(active_cycles)}개 사이클 중 {iternum}번째)")
         logging.info(f"주문 실행할 종목 : {ticker}")
         logging.info(f"적용 방법론 : {method_ver}")
+
+        # 매수주문 직전 프리장 실시간가로 recompute 재트리거 (큰수매수가 최신화)
+        if ticker:
+            _trigger_recompute_with_live_price(cycle_id, ticker)
 
         # 최신 computed 데이터 조회
         computed, computed_updated_at = _get_latest_computed(sb, cycle_id)
