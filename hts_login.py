@@ -192,13 +192,7 @@ def hts_login(
             if "no active desktop" in err_msg and login_attempt < max_login_retries - 1:
                 logging.warning(f"데스크톱 세션 끊김 감지. 복원 후 재시도합니다. ({login_attempt+1}/{max_login_retries})")
                 block_input(False)
-                # HTS 프로세스 정리
-                try:
-                    from utils import kill_window_by_title
-                    kill_window_by_title("iMeritz")
-                except Exception:
-                    pass
-                # 데스크톱 복원 시도
+                # 데스크톱 복원을 우선 시도 (창 정리는 다음 재시도의 launch_program()이 프로세스명 기준으로 처리)
                 if not ensure_active_desktop():
                     logging.error("데스크톱 복원 실패. 로그인을 중단합니다.")
                     return False
