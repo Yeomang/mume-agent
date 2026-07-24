@@ -27,6 +27,8 @@ from typing import Any, Dict, List, Tuple
 _cached_auth_user_ids: List[str] = []
 # user_name → auth_user_id 매핑 캐시
 _cached_user_auth_map: Dict[str, str] = {}
+# (user_name, account_index) → user_accounts.id 매핑 캐시
+_cached_account_id_map: Dict[Tuple[str, int], int] = {}
 
 
 def _load_from_supabase() -> Dict[str, List[int]] | None:
@@ -34,7 +36,7 @@ def _load_from_supabase() -> Dict[str, List[int]] | None:
     Supabase user_accounts 테이블에서 is_automation_target=true인 계좌를 조회.
     조회 실패 시 None을 반환.
     """
-    global _cached_auth_user_ids, _cached_user_auth_map
+    global _cached_auth_user_ids, _cached_user_auth_map, _cached_account_id_map
     try:
         from supabase_client import get_supabase_client
         from config import Config
@@ -63,7 +65,7 @@ def _load_from_supabase() -> Dict[str, List[int]] | None:
 
         query = (
             sb.table("user_accounts")
-            .select("auth_user_id,user_name,account_index")
+            .select("id,auth_user_id,user_name,account_index")
             .eq("is_automation_target", True)
         )
         if owner_uid:
@@ -93,6 +95,9 @@ def _load_from_supabase() -> Dict[str, List[int]] | None:
             if uid:
                 auth_user_ids.add(str(uid))
                 _cached_user_auth_map[name] = str(uid)
+            acc_id = row.get("id")
+            if acc_id is not None:
+                _cached_account_id_map[(name, acc)] = int(acc_id)
 
         _cached_auth_user_ids = list(auth_user_ids)
         logging.info(f"[automation_target] auth_user_ids: {_cached_auth_user_ids}")
@@ -114,6 +119,16 @@ def get_auth_user_id_for(user_name: str) -> str | None:
     if not _cached_user_auth_map:
         _load_from_supabase()
     return _cached_user_auth_map.get(user_name)
+
+
+def get_account_id_for(user_name: str, account_index: int) -> int | None:
+    """(user_name, account_index)에 대응하는 user_accounts.id(PK)를 반환.
+
+    account_daily_return 등 account_id FK를 쓰는 테이블에 upsert할 때 필요.
+    """
+    if not _cached_account_id_map:
+        _load_from_supabase()
+    return _cached_account_id_map.get((user_name, int(account_index)))
 
 
 def load_automation_target(

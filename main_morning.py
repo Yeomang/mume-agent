@@ -37,6 +37,8 @@ from order_execution_data_preprocessing import order_execution_data_preprocessin
 from order_execution_update_supabase import orders_execution_update_supabase
 from hts_stock_balance_save_to_csv import save_data_stock_balance
 from stock_balance_data_preprocessing import stock_balance_data_preprocessing
+from hts_daily_return_save_to_csv import save_data_daily_return
+from daily_return_update_supabase import sync_daily_return_to_db
 from utils import kill_window_by_title, to_yyyymmdd
 from job_control import register_job_pid, unregister_job_pid
 from automation_target_store import load_automation_target, get_auth_user_ids
@@ -142,6 +144,10 @@ def run_morning_job(is_test_mode: bool = False, manual: bool = False):
             from main_evening import _sync_cash_balance_to_db, _sync_stock_balance_to_db
             _sync_cash_balance_to_db(user, account_index)
             _sync_stock_balance_to_db(user, account_index)
+
+            # HTS에서 일별 계좌수익률 데이터 csv로 저장 후 Supabase에 동기화 (계좌 레벨)
+            save_data_daily_return(user, account_index)
+            sync_daily_return_to_db(user, account_index)
 
             # Supabase에 체결내역 업데이트 (사이클 레벨)
             if inquiry_start_date and inquiry_end_date:
