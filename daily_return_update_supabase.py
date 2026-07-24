@@ -145,6 +145,20 @@ def sync_daily_return_to_db(selected_user: str, account_index: int):
         logging.info(f"[일별계좌수익률] {selected_user}/{account_index} 가져올 데이터 없음")
         return
 
+    # 최초 동기화 여부 확인 (안내 텔레그램 발송용) — upsert 전에 확인해야 함
+    try:
+        existing_res = (
+            sb.table("account_daily_return")
+            .select("id")
+            .eq("auth_user_id", auth_user_id)
+            .eq("account_id", account_id)
+            .limit(1)
+            .execute()
+        )
+        is_first_sync = not (existing_res.data or [])
+    except Exception:
+        is_first_sync = False
+
     now = dt.datetime.now(dt.timezone.utc).isoformat()
     upsert_rows = [{
         "auth_user_id": auth_user_id,
@@ -166,6 +180,19 @@ def sync_daily_return_to_db(selected_user: str, account_index: int):
     except Exception as e:
         logging.error(f"[일별계좌수익률] {selected_user}/{account_index} upsert 실패: {e}")
         return
+
+    # 최초 동기화라면 iMeritz의 2년 조회 제한을 안내 (그 이전 기록은 콘솔 CSV 업로드로 보충 필요)
+    if is_first_sync:
+        dates = sorted(r["snapshot_date"] for r in rows)
+        message = (
+            f"📅 *[자산 이력 안내]*\n\n"
+            f"▶ 계좌: {selected_user} | {account_index}번째 계좌\n"
+            f"▶ 일별 계좌수익률 최초 동기화 완료 ({dates[0]} ~ {dates[-1]}, {len(rows)}건)\n\n"
+            f"⚠️ iMeritz는 최근 2년치까지만 자동 수집됩니다.\n"
+            f"그 이전 기록이 필요하면 콘솔 CSV 업로드를 이용해주세요."
+        )
+        send_telegram_message(Config.TELEGRAM_BOT_TOKEN_EXECUTION, Config.TELEGRAM_CHAT_ID, message)
+        logging.info(f"[일별계좌수익률] {selected_user}/{account_index} 최초 동기화 안내 알림 전송")
 
     # 입출금이 있는데 아직 사람이 분류 안 한 날짜 확인 → 텔레그램 알림
     try:
