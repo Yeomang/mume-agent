@@ -12,6 +12,7 @@
 
 | 날짜 | 내용 |
 |------|------|
+| 2026-07-28 | get_unfilled_tickers_dict: wait_for_window가 못 찾을 때 예외를 던진다고 잘못 가정해 try/except로 감쌌던 버그 수정 (실제로는 None 반환 — utils.py:449). 이 때문에 미체결 그리드가 비어있어 저장창이 안 떠도 "정상 없음" 분기가 전혀 실행되지 않고 항상 "CSV 생성 안 됨" 실패로 빠지고 있었음. 리턴값을 직접 확인하는 방식으로 교체 |
 | 2026-07-28 | get_unfilled_tickers_dict: 화면 진입/탭 클릭/그리드 우클릭/메뉴 선택 등 단계별 로그를 다른 CSV 저장 함수들과 동일한 수준으로 추가 (실패 시 정확히 어느 단계에서 멈췄는지 로그만으로 진단 가능하도록) |
 | 2026-07-28 | get_unfilled_tickers_dict(미체결 조회): CSV 저장이 조용히 실패하며 며칠 전 파일을 계속 재사용해 미체결 오판(evening job 전체 스킵)이 8일간 지속되던 근본 버그 수정. 저장 전 기존 파일 삭제 + 실패 지점을 예외로 승격해 호출부(hts_orders_from_supabase.py)가 "확인된 없음"과 "확인 실패"를 구분해 안전 스킵하도록 변경. save_orders_history(주문내역 저장)에도 동일한 파일 삭제 적용 |
 | 2026-07-27 | main_cancel_orders.py: logging.basicConfig() 호출 순서를 다른 import보다 앞으로 이동 (다른 모듈이 root logger에 먼저 핸들러를 붙여 log.log에 아무 로그도 안 남던 버그 수정) |

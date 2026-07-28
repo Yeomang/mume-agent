@@ -221,10 +221,10 @@ def get_unfilled_tickers_dict(selected_user, account_index) -> dict:
         logging.info("'Csv로 저장' 버튼을 클릭하였습니다.")
         time.sleep(1)
 
-        try:
-            logging.info("'다른 이름으로 저장' 창 대기 중 (최대 5초)...")
-            wait_for_window("다른 이름으로 저장", main_window, "다른 이름으로 저장", "Window", timeout=5)
-        except Exception:
+        logging.info("'다른 이름으로 저장' 창 대기 중 (최대 5초)...")
+        dialog = wait_for_window("다른 이름으로 저장", main_window, "다른 이름으로 저장", "Window", timeout=5)
+        if not dialog:
+            # wait_for_window는 못 찾아도 예외를 던지지 않고 None을 반환한다 (utils.py:449).
             # 실측 확인됨: 미체결 그리드가 진짜 비어있으면 우클릭해도 컨텍스트 메뉴 자체가
             # 안 뜨고, 그래서 "다른 이름으로 저장" 창도 안 뜬다 — 이건 정상적인 "미체결 없음"
             # 케이스다. 저장 시도 전에 이미 기존 파일을 지워뒀으므로(위 unlink), 여기서
