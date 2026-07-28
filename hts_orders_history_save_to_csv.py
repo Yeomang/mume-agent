@@ -158,27 +158,33 @@ def get_unfilled_tickers_dict(selected_user, account_index) -> dict:
         app = Application(backend="uia").connect(handle=hwnd)
         main_window = app.window(handle=hwnd)
 
+        logging.info(f"화면번호 [{SCREEN_NUM_ORDER}]를 입력하여 '해외주식 주문' 창을 띄우는 중...")
         search_input = find_control_by_criteria(main_window, "Edit", automation_id=AUTO_ID_SCREEN_SEARCH_INPUT)
         set_focus_and_type(search_input, SCREEN_NUM_ORDER)
 
         order_window = find_control_by_criteria(main_window, "Window", title="[06100] 해외주식 주문", delay=2, retries=5)
         if not order_window:
             raise Exception("[06100] 해외주식 주문 창을 찾을 수 없습니다.")
+        logging.info("'해외주식 주문' 창을 띄웠습니다.")
 
         dropdown = find_control_by_criteria(order_window, "Pane", automation_id=AUTO_ID_DROPDOWN_ACCOUNT, index=CTRL_INDEX_DROPDOWN_ACCOUNT)
         if not dropdown:
             raise Exception("계좌 드롭다운을 찾을 수 없습니다.")
         dropdown.click_input()
         send_keys(f"{{PGUP}}{{DOWN {account_index}}}{{ENTER}}")
+        logging.info(f"{selected_user}님의 {account_index}번째 계좌번호를 선택하였습니다.")
 
         _handle_password_dialog(main_window, password)
 
+        logging.info("미체결 탭 버튼 찾는 중...")
         tab_unfilled = find_control_by_criteria(main_window, "TabItem", title="미체결")
         if not tab_unfilled:
             raise Exception("미체결 탭을 찾을 수 없습니다.")
         tab_unfilled.click_input()
+        logging.info("미체결 탭을 클릭하였습니다.")
         time.sleep(2)
 
+        logging.info("하단 탭 컨트롤 찾는 중...")
         bottom_tab = find_control_by_criteria(order_window, "Tab", automation_id=AUTO_ID_BOTTOM_TAB)
         if not bottom_tab:
             raise Exception("하단 탭 컨트롤을 찾을 수 없습니다.")
@@ -202,16 +208,21 @@ def get_unfilled_tickers_dict(selected_user, account_index) -> dict:
             raise Exception("미체결 그리드 컨트롤을 찾을 수 없습니다 (화면 구조 이상 의심).")
 
         grid_rect = grid.rectangle()
+        logging.info(f"그리드 위치: left={grid_rect.left}, top={grid_rect.top}, right={grid_rect.right}, bottom={grid_rect.bottom}")
         x = int(grid_rect.left + (grid_rect.right - grid_rect.left) / 2)
         y = int(grid_rect.top + 25)
         click(button="right", coords=(x, y))
+        logging.info("미체결 그리드를 우클릭하였습니다.")
         time.sleep(1)
         send_keys("{DOWN 6}{ENTER}")
+        logging.info("'파일로 보내기' 버튼을 클릭하였습니다. (메뉴 6번째)")
         time.sleep(0.5)
         send_keys("c")
+        logging.info("'Csv로 저장' 버튼을 클릭하였습니다.")
         time.sleep(1)
 
         try:
+            logging.info("'다른 이름으로 저장' 창 대기 중 (최대 5초)...")
             wait_for_window("다른 이름으로 저장", main_window, "다른 이름으로 저장", "Window", timeout=5)
         except Exception:
             # 실측 확인됨: 미체결 그리드가 진짜 비어있으면 우클릭해도 컨텍스트 메뉴 자체가
