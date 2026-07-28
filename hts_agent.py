@@ -89,6 +89,11 @@ LAST_STATUS: Dict[str, Dict[str, Optional[str]]] = {
 PROC_LOCK = threading.Lock()
 _alerted_jobs: set = set()  # (job, date_str) 이미 알림 보낸 것
 
+# 실행 중인 작업 때문에 즉시 적용하지 못한 배포 요청. 작업이 끝나는 대로
+# _pending_deploy_monitor_loop가 자동으로 적용한다 (최신 요청 1건만 유지).
+PENDING_DEPLOY: Optional[Dict[str, str]] = None
+PENDING_DEPLOY_LOCK = threading.Lock()
+
 # ─────────────────────────────────────
 # FastAPI 앱
 # ─────────────────────────────────────
@@ -100,6 +105,7 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 def on_startup():
     _agent_logger.info("═══ HTS Agent 서버 시작 (port 9000) ═══")
     threading.Thread(target=_job_log_monitor_loop, daemon=True, name="job-log-monitor").start()
+    threading.Thread(target=_pending_deploy_monitor_loop, daemon=True, name="pending-deploy-monitor").start()
 
 
 @app.on_event("shutdown")
@@ -755,6 +761,36 @@ def _check_running_jobs() -> list[str]:
     return running
 
 
+def _apply_pending_deploy_if_idle() -> None:
+    """대기 중인 배포 요청이 있고 지금 실행 중인 작업이 없으면 자동으로 적용한다."""
+    global PENDING_DEPLOY
+    with PENDING_DEPLOY_LOCK:
+        pending = PENDING_DEPLOY
+        if not pending:
+            return
+        if _check_running_jobs():
+            return  # 아직 실행 중 — 다음 주기에 다시 시도
+        PENDING_DEPLOY = None
+
+    write_log("DEPLOY_START", "deploy", f"(대기 후 자동 적용) sha={pending['sha']}, url={pending['release_url']}")
+    try:
+        result = _execute_deploy(pending["release_url"], pending["github_token"])
+        write_log("DEPLOY_SUCCESS", "deploy", json.dumps(result, ensure_ascii=False))
+    except Exception as e:
+        write_log("DEPLOY_ERROR", "deploy", str(e))
+
+
+def _pending_deploy_monitor_loop() -> None:
+    """대기 중인 배포 요청을 30초마다 확인해, 작업이 모두 끝나면 자동으로 적용한다."""
+    import time
+    while True:
+        try:
+            _apply_pending_deploy_if_idle()
+        except Exception as e:
+            _agent_logger.error(f"대기 배포 모니터 오류: {e}")
+        time.sleep(30)
+
+
 def _download_release(release_url: str, github_token: str, dest_path: str) -> None:
     headers = {}
     if github_token:
@@ -908,12 +944,17 @@ def deploy(payload: dict = Body(...)):
     if not any(host_path.startswith(p.lower()) for p in allowed_prefixes):
         raise HTTPException(status_code=403, detail=f"허용되지 않은 배포 URL입니다: {parsed.hostname}")
 
-    # 실행 중인 작업이 있으면 배포 거부
+    # 실행 중인 작업이 있으면 즉시 배포하지 않고, 작업 종료 후 자동 적용되도록 예약한다.
+    # (콘솔 쪽에는 기존과 동일하게 409로 응답 — 재시도는 각 에이전트가 알아서 처리)
     running_jobs = _check_running_jobs()
     if running_jobs:
+        global PENDING_DEPLOY
+        with PENDING_DEPLOY_LOCK:
+            PENDING_DEPLOY = {"release_url": release_url, "sha": sha, "github_token": github_token}
+        write_log("DEPLOY_PENDING", "deploy", f"실행 중({', '.join(running_jobs)}) — 종료 후 자동 적용 예약. sha={sha}")
         raise HTTPException(
             status_code=409,
-            detail=f"실행 중인 작업이 있어 배포할 수 없습니다: {', '.join(running_jobs)}"
+            detail=f"실행 중인 작업이 있어 배포할 수 없습니다: {', '.join(running_jobs)} (작업 종료 후 자동 적용 예약됨)"
         )
 
     write_log("DEPLOY_START", "deploy", f"sha={sha}, url={release_url}")
