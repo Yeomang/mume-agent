@@ -205,7 +205,10 @@ def get_unfilled_tickers_dict(selected_user, account_index) -> dict:
         if not grid:
             # 그리드 "틀"조차 못 찾은 건 화면이 예상과 다르다는 뜻 — 정말 미체결이
             # 없는 것과는 다른 상황이라 실패로 처리한다 (호출부가 스킵하도록).
-            order_window.close()
+            try:
+                order_window.close()
+            except Exception:
+                pass  # 창이 이미 닫혔거나 응답 없는 상태일 수 있음 — 무시하고 원래 예외를 그대로 전달
             raise Exception("미체결 그리드 컨트롤을 찾을 수 없습니다 (화면 구조 이상 의심).")
 
         grid_rect = grid.rectangle()
@@ -230,8 +233,15 @@ def get_unfilled_tickers_dict(selected_user, account_index) -> dict:
             # 안 뜨고, 그래서 "다른 이름으로 저장" 창도 안 뜬다 — 이건 정상적인 "미체결 없음"
             # 케이스다. 저장 시도 전에 이미 기존 파일을 지워뒀으므로(위 unlink), 여기서
             # {}를 반환해도 스테일 파일을 재사용하는 원래 버그는 재발하지 않는다.
-            send_keys("{ESC}")
-            order_window.close()
+            # (참고: 여기서 send_keys("{ESC}")를 보냈다가, 열려있는 팝업이 없는 상태에서
+            # 그 ESC가 [06100] 주문 창 자체에 전달되어 창을 닫아버리는 사고가 있었음.
+            # 그 뒤 order_window.close()가 이미 안 보이는 창을 다시 닫으려다 pywinauto
+            # 내부에서 ElementNotVisible을 던졌음 — ESC 전송을 제거하고 close()도
+            # 실패해도 무시하도록 방어)
+            try:
+                order_window.close()
+            except Exception:
+                pass
             logging.info("[중복방지] '다른 이름으로 저장' 창 없음 — 그리드가 비어 미체결 주문 없음으로 확인.")
             return {}
 
@@ -240,7 +250,10 @@ def get_unfilled_tickers_dict(selected_user, account_index) -> dict:
         send_keys("^v{ENTER}")
         time.sleep(1)
 
-        order_window.close()
+        try:
+            order_window.close()
+        except Exception:
+            pass  # 저장 자체는 끝났으므로 창 닫기 실패로 전체를 실패 처리하지 않음
 
         if not save_path.exists():
             # 저장창은 떴지만 실제로 파일이 새로 생기지 않음 (예: 덮어쓰기 확인

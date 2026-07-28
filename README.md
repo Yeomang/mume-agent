@@ -12,6 +12,7 @@
 
 | 날짜 | 내용 |
 |------|------|
+| 2026-07-28 | get_unfilled_tickers_dict: 그리드가 비어 팝업이 안 떴을 때 보내던 send_keys("{ESC}")가, 열려있는 팝업이 없는 상태라 [06100] 주문 창 자체를 닫아버려 그 직후 order_window.close()가 ElementNotVisible로 실패하던 버그 수정. ESC 전송 제거 + 모든 order_window.close() 호출을 실패해도 무시하도록 방어 |
 | 2026-07-28 | get_unfilled_tickers_dict/hts_orders_from_supabase.py: 미체결 조회 실패 로그가 str(e)만 남겨 빈 문자열 예외(일부 COM 에러 등)의 원인을 알 수 없던 문제 수정. 예외 타입 + traceback을 함께 남기도록 로깅 보강 |
 | 2026-07-28 | get_unfilled_tickers_dict: send_keys("{ESCAPE}") 오타 수정 → "{ESC}" (pywinauto에서 정의되지 않은 코드라 "Unknown code: ESCAPE" 예외 발생). 이전엔 wait_for_window 버그로 이 분기가 실행된 적이 없어 드러나지 않다가, 그 버그를 고치자마자 처음 실행되며 발견됨 |
 | 2026-07-28 | hts_agent.py: /deploy가 실행 중인 작업 때문에 거부되면(409) 요청을 PENDING_DEPLOY로 기억해두고, 백그라운드 스레드(30초 주기)가 작업 종료를 감지해 자동으로 재적용하도록 개선. 이전엔 콘솔에서 수동으로 /deploy를 다시 눌러야 했음 |
