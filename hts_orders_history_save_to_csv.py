@@ -6,6 +6,7 @@ import time
 from pywinauto.keyboard import send_keys
 from pywinauto.mouse import click
 import logging
+import traceback
 from pathlib import Path
 import os
 
@@ -284,7 +285,9 @@ def get_unfilled_tickers_dict(selected_user, account_index) -> dict:
         return result
 
     except Exception as e:
-        logging.error(f"[중복방지] 미체결 주문 조회 실패 — 호출부에서 안전하게 스킵되어야 함: {e}")
+        # str(e)가 빈 문자열인 예외(일부 COM 에러 등)가 있어 타입과 traceback을 함께 남긴다.
+        logging.error(f"[중복방지] 미체결 주문 조회 실패 — 호출부에서 안전하게 스킵되어야 함: {type(e).__name__}: {e}")
+        logging.error(traceback.format_exc())
         raise
     finally:
         block_input(False)

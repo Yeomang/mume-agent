@@ -12,6 +12,7 @@
 
 | 날짜 | 내용 |
 |------|------|
+| 2026-07-28 | get_unfilled_tickers_dict/hts_orders_from_supabase.py: 미체결 조회 실패 로그가 str(e)만 남겨 빈 문자열 예외(일부 COM 에러 등)의 원인을 알 수 없던 문제 수정. 예외 타입 + traceback을 함께 남기도록 로깅 보강 |
 | 2026-07-28 | get_unfilled_tickers_dict: send_keys("{ESCAPE}") 오타 수정 → "{ESC}" (pywinauto에서 정의되지 않은 코드라 "Unknown code: ESCAPE" 예외 발생). 이전엔 wait_for_window 버그로 이 분기가 실행된 적이 없어 드러나지 않다가, 그 버그를 고치자마자 처음 실행되며 발견됨 |
 | 2026-07-28 | hts_agent.py: /deploy가 실행 중인 작업 때문에 거부되면(409) 요청을 PENDING_DEPLOY로 기억해두고, 백그라운드 스레드(30초 주기)가 작업 종료를 감지해 자동으로 재적용하도록 개선. 이전엔 콘솔에서 수동으로 /deploy를 다시 눌러야 했음 |
 | 2026-07-28 | get_unfilled_tickers_dict: wait_for_window가 못 찾을 때 예외를 던진다고 잘못 가정해 try/except로 감쌌던 버그 수정 (실제로는 None 반환 — utils.py:449). 이 때문에 미체결 그리드가 비어있어 저장창이 안 떠도 "정상 없음" 분기가 전혀 실행되지 않고 항상 "CSV 생성 안 됨" 실패로 빠지고 있었음. 리턴값을 직접 확인하는 방식으로 교체 |

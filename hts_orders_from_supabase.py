@@ -366,10 +366,11 @@ def hts_orders_from_supabase(
             logging.info(f"[중복방지] 미체결 조회 완료: {list(_unfilled_dict.keys())}")
         except Exception as e:
             _unfilled_check_failed = True
-            logging.error(f"[중복방지] 미체결 조회 실패 — 이번 실행의 전체 매도/매수를 안전하게 스킵합니다: {e}")
+            _err_detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__} (메시지 없음, log.log의 traceback 참고)"
+            logging.error(f"[중복방지] 미체결 조회 실패 — 이번 실행의 전체 매도/매수를 안전하게 스킵합니다: {_err_detail}")
             send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID,
                 f"🚨 *[{selected_user} | {account_index}번 계좌] 미체결 조회 실패*\n\n"
-                f"사유: {e}\n"
+                f"사유: {_err_detail}\n"
                 f"▶ 실제 미체결 상태를 확인할 수 없어 이번 실행의 매도/매수 주문을 전체 스킵합니다.\n"
                 f"▶ HTS에서 직접 미체결 탭을 확인해주세요."
             )
