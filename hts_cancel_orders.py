@@ -97,6 +97,9 @@ def hts_cancel_orders(selected_user, account_index, is_test_mode):
             logging.warning("미체결 탭을 찾지 못했습니다.")
             raise Exception("미체결 탭을 찾을 수 없습니다.")
 
+        # 잠시 대기 (미체결 데이터 로딩)
+        time.sleep(2)
+
         # 하단 탭 컨트롤 찾기 (미체결/주문체결/주문가능 등이 있는 탭)
         # order_window 전체에서 검색하면 동일 auto_id를 가진 다른 컨트롤이 먼저 잡히므로,
         # 하단 탭 내부에서만 검색하여 정확한 컨트롤을 찾음
@@ -105,69 +108,45 @@ def hts_cancel_orders(selected_user, account_index, is_test_mode):
         if not bottom_tab:
             raise Exception("하단 탭 컨트롤을 찾을 수 없습니다.")
 
-        # "종목확인"(일괄취소할 종목을 체크하여 주십시오) 모달은
-        # ① 진짜 미체결 주문이 없을 때 ② 미체결 주문은 있지만 전체선택 체크박스 클릭이
-        # 그리드 로딩 타이밍 문제로 씹혔을 때, 두 경우 모두 동일하게 뜬다.
-        # 한 번의 클릭 실패로 "미체결 없음"을 단정하면 실제로는 주문이 남아있는데
-        # 취소 완료로 잘못 보고될 수 있어, 대기시간을 늘려 최대 2회 재시도한다.
-        MAX_SELECT_ATTEMPTS = 2
-        no_order_confirmed = False
-        for attempt in range(1, MAX_SELECT_ATTEMPTS + 1):
-            # 미체결 데이터 로딩 대기 (재시도 시 더 길게)
-            time.sleep(2 if attempt == 1 else 4)
+        # 전체 선택 체크박스 클릭 (그리드 헤더의 전체선택 컬럼 상대좌표 클릭)
+        logging.info("전체 선택 체크박스 클릭 중...")
+        grid = find_control_by_criteria(bottom_tab, "Pane", automation_id=AUTO_ID_UNFILLED_GRID, silent=True)
+        if grid:
+            grid_rect = grid.rectangle()
+            logging.info(f"그리드 위치: left={grid_rect.left}, top={grid_rect.top}, right={grid_rect.right}, bottom={grid_rect.bottom}")
+            grid.click_input(coords=SELECT_ALL_CHECKBOX_COORDS)
+            logging.info("전체 선택 체크박스를 클릭하였습니다.")
+        else:
+            logging.info("미체결 그리드를 찾지 못했습니다. 미체결 주문이 없을 수 있습니다.")
 
-            # 전체 선택 체크박스 클릭 (그리드 헤더의 전체선택 컬럼 상대좌표 클릭)
-            logging.info(f"전체 선택 체크박스 클릭 중... (시도 {attempt}/{MAX_SELECT_ATTEMPTS})")
-            grid = find_control_by_criteria(bottom_tab, "Pane", automation_id=AUTO_ID_UNFILLED_GRID, silent=True)
-            if grid:
-                grid_rect = grid.rectangle()
-                logging.info(f"그리드 위치: left={grid_rect.left}, top={grid_rect.top}, right={grid_rect.right}, bottom={grid_rect.bottom}")
-                grid.click_input(coords=SELECT_ALL_CHECKBOX_COORDS)
-                logging.info("전체 선택 체크박스를 클릭하였습니다.")
-            else:
-                logging.info("미체결 그리드를 찾지 못했습니다. 미체결 주문이 없을 수 있습니다.")
+        # 일괄취소 버튼 클릭 (하단 탭 내부에서 검색, 못 찾으면 order_window에서 재시도)
+        logging.info("일괄취소 버튼 찾는 중...")
+        batch_cancel_button = find_control_by_criteria(bottom_tab, "Button", automation_id=AUTO_ID_BATCH_CANCEL_BUTTON, silent=True)
+        if not batch_cancel_button:
+            # bottom_tab에서 못 찾으면 order_window 전체에서 검색
+            batch_cancel_button = find_control_by_criteria(order_window, "Button", automation_id=AUTO_ID_BATCH_CANCEL_BUTTON)
+        if batch_cancel_button:
+            batch_cancel_button.click_input()
+            logging.info("일괄취소 버튼을 클릭하였습니다.")
+        else:
+            raise Exception("일괄취소 버튼을 찾을 수 없습니다.")
 
-            # 일괄취소 버튼 클릭 (하단 탭 내부에서 검색, 못 찾으면 order_window에서 재시도)
-            logging.info("일괄취소 버튼 찾는 중...")
-            batch_cancel_button = find_control_by_criteria(bottom_tab, "Button", automation_id=AUTO_ID_BATCH_CANCEL_BUTTON, silent=True)
-            if not batch_cancel_button:
-                # bottom_tab에서 못 찾으면 order_window 전체에서 검색
-                batch_cancel_button = find_control_by_criteria(order_window, "Button", automation_id=AUTO_ID_BATCH_CANCEL_BUTTON)
-            if batch_cancel_button:
-                batch_cancel_button.click_input()
-                logging.info("일괄취소 버튼을 클릭하였습니다.")
-            else:
-                raise Exception("일괄취소 버튼을 찾을 수 없습니다.")
+        # 일괄취소 버튼 클릭 후 모달 처리
+        # 1) 미체결 주문이 없으면 "종목확인" 모달 ("일괄취소할 종목을 체크하여 주십시오")
+        # 2) 미체결 주문이 있으면 "해외주식 일괄 취소주문 확인창" 모달
+        time.sleep(2)
+        logging.info("모달 확인 중...")
 
-            # 일괄취소 버튼 클릭 후 모달 처리
-            # 1) 미체결 주문이 없거나 선택이 안 됐으면 "종목확인" 모달 ("일괄취소할 종목을 체크하여 주십시오")
-            # 2) 미체결 주문이 있고 정상 선택됐으면 "해외주식 일괄 취소주문 확인창" 모달
-            time.sleep(2)
-            logging.info("모달 확인 중...")
-
-            no_order_modal = find_control_by_criteria(main_window, "Window", title="종목확인", delay=0, silent=True)
-            if not no_order_modal:
-                # 정상적으로 취소 확인 모달로 넘어감 — 재시도 루프 탈출
-                break
-
-            if attempt < MAX_SELECT_ATTEMPTS:
-                logging.info(f"'종목확인' 모달 발생 (시도 {attempt}/{MAX_SELECT_ATTEMPTS}) — 선택 실패 가능성. 재시도합니다.")
-                ok_btn = find_control_by_criteria(no_order_modal, "Button", automation_id="2", delay=0)
-                if ok_btn:
-                    ok_btn.click_input()
-                continue
-
-            # 마지막 시도에서도 "종목확인" 모달 → 진짜로 미체결 주문 없음으로 확정
-            logging.info("재시도 후에도 미체결 주문이 없습니다. '종목확인' 모달의 확인 버튼을 클릭합니다.")
+        # 먼저 "종목확인" 모달 체크 (미체결 주문 없음)
+        no_order_modal = find_control_by_criteria(main_window, "Window", title="종목확인", delay=0, silent=True)
+        if no_order_modal:
+            logging.info("미체결 주문이 없습니다. '종목확인' 모달의 확인 버튼을 클릭합니다.")
             ok_btn = find_control_by_criteria(no_order_modal, "Button", automation_id="2", delay=0)
             if ok_btn:
                 ok_btn.click_input()
             order_window.close()
             logging.info("'해외주식 주문' 창을 닫았습니다.")
             logging.info(">>>>> 미체결 주문 없음 — 일괄 취소 건너뜀 <<<<<")
-            no_order_confirmed = True
-
-        if no_order_confirmed:
             return True, "미체결 주문 없음"
 
         # "해외주식 일괄 취소주문 확인창" 모달 처리
