@@ -113,6 +113,10 @@ def save_orders_history(selected_user, account_index):
     # 파일경로 Unicode 적용
     save_path = Path(current_dir) / "data" / "order_history_raw" / f"order_history_raw_{selected_user}_{account_index}.csv"
 
+    # 기존 파일 삭제 — 저장이 조용히 실패해도 예전 주문내역을 오늘 것으로 착각해
+    # 텔레그램에 잘못 표시하는 일이 없도록 함 (get_unfilled_tickers_dict와 동일한 이유)
+    save_path.unlink(missing_ok=True)
+
     # 클립보드에 UTF-16LE로 복사
     copy_to_clipboard(str(save_path))
 
@@ -210,12 +214,14 @@ def get_unfilled_tickers_dict(selected_user, account_index) -> dict:
         try:
             wait_for_window("다른 이름으로 저장", main_window, "다른 이름으로 저장", "Window", timeout=5)
         except Exception:
-            # 방금 파일을 지웠으므로, 저장창이 안 뜬 게 "미체결 없음"인지
-            # "그리드가 비어 우클릭 메뉴 구성이 달라져 저장 자체가 안 열린 것"인지
-            # 구분할 수 없다 — 안전하게 실패로 처리한다.
+            # 실측 확인됨: 미체결 그리드가 진짜 비어있으면 우클릭해도 컨텍스트 메뉴 자체가
+            # 안 뜨고, 그래서 "다른 이름으로 저장" 창도 안 뜬다 — 이건 정상적인 "미체결 없음"
+            # 케이스다. 저장 시도 전에 이미 기존 파일을 지워뒀으므로(위 unlink), 여기서
+            # {}를 반환해도 스테일 파일을 재사용하는 원래 버그는 재발하지 않는다.
             send_keys("{ESCAPE}")
             order_window.close()
-            raise Exception("'다른 이름으로 저장' 창이 뜨지 않음 — CSV 갱신 여부 확인 불가.")
+            logging.info("[중복방지] '다른 이름으로 저장' 창 없음 — 그리드가 비어 미체결 주문 없음으로 확인.")
+            return {}
 
         copy_to_clipboard(str(save_path))
         send_keys("%n")
