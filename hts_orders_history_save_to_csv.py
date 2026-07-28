@@ -138,8 +138,11 @@ def get_unfilled_tickers_dict(selected_user, account_index) -> dict:
     """
     미체결 탭에서 현재 미체결 주문을 조회하여 종목별 매도/매수 여부를 반환.
     반환: {"TQQQ": {"sell": True, "buy": True}, ...}
-    미체결 없음 또는 실패 시 빈 dict 반환.
-    Day Order은 US 장 종료 시 자동 소멸하므로 다음 날에는 미체결 탭에서 사라짐.
+    빈 dict({})는 "이번에 새로 확인했더니 미체결이 없었다"만 의미한다.
+    조회 자체가 실패하면(창/컨트롤을 못 찾음, CSV가 새로 안 써짐 등) 예외를 던진다 —
+    호출부가 "확인된 없음"과 "확인 자체를 못 함"을 구분해서 후자는 안전하게 스킵하도록 하기 위함.
+    (과거엔 실패도 빈 dict로 뭉뚱그려 반환했는데, CSV 저장이 매번 조용히 실패하면서
+    수일 전 파일을 계속 재사용해 "미체결 있음"을 오래도록 잘못 보고한 사고가 있었음.)
     """
     logging.info(">>>>> 미체결 주문 조회 시작 <<<<<")
     order_window = None
@@ -176,11 +179,23 @@ def get_unfilled_tickers_dict(selected_user, account_index) -> dict:
         if not bottom_tab:
             raise Exception("하단 탭 컨트롤을 찾을 수 없습니다.")
 
+        # 저장 경로를 그리드 존재 확인보다 먼저 계산해, 그리드가 없는 케이스도
+        # 아래에서 "이전 파일 삭제"와 동일한 방식으로 안전하게 처리한다.
+        save_dir = Path("./data/unfilled_orders_raw")
+        save_dir.mkdir(parents=True, exist_ok=True)
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        save_path = Path(current_dir) / "data" / "unfilled_orders_raw" / f"unfilled_orders_{selected_user}_{account_index}.csv"
+
+        # 이전 실행의 CSV를 먼저 지운다 — 이번 저장이 조용히 실패해도
+        # "며칠 전 파일을 새 조회 결과인 것처럼" 재사용하는 사고를 원천 차단.
+        save_path.unlink(missing_ok=True)
+
         grid = find_control_by_criteria(bottom_tab, "Pane", automation_id=AUTO_ID_UNFILLED_GRID, silent=True)
         if not grid:
-            logging.info("[중복방지] 미체결 그리드 없음 — 미체결 주문 없음으로 처리.")
+            # 그리드 "틀"조차 못 찾은 건 화면이 예상과 다르다는 뜻 — 정말 미체결이
+            # 없는 것과는 다른 상황이라 실패로 처리한다 (호출부가 스킵하도록).
             order_window.close()
-            return {}
+            raise Exception("미체결 그리드 컨트롤을 찾을 수 없습니다 (화면 구조 이상 의심).")
 
         grid_rect = grid.rectangle()
         x = int(grid_rect.left + (grid_rect.right - grid_rect.left) / 2)
@@ -192,18 +207,15 @@ def get_unfilled_tickers_dict(selected_user, account_index) -> dict:
         send_keys("c")
         time.sleep(1)
 
-        save_dir = Path("./data/unfilled_orders_raw")
-        save_dir.mkdir(parents=True, exist_ok=True)
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        save_path = Path(current_dir) / "data" / "unfilled_orders_raw" / f"unfilled_orders_{selected_user}_{account_index}.csv"
-
         try:
             wait_for_window("다른 이름으로 저장", main_window, "다른 이름으로 저장", "Window", timeout=5)
         except Exception:
-            logging.info("[중복방지] '다른 이름으로 저장' 창 없음 — 미체결 주문 없음으로 처리.")
+            # 방금 파일을 지웠으므로, 저장창이 안 뜬 게 "미체결 없음"인지
+            # "그리드가 비어 우클릭 메뉴 구성이 달라져 저장 자체가 안 열린 것"인지
+            # 구분할 수 없다 — 안전하게 실패로 처리한다.
             send_keys("{ESCAPE}")
             order_window.close()
-            return {}
+            raise Exception("'다른 이름으로 저장' 창이 뜨지 않음 — CSV 갱신 여부 확인 불가.")
 
         copy_to_clipboard(str(save_path))
         send_keys("%n")
@@ -211,11 +223,13 @@ def get_unfilled_tickers_dict(selected_user, account_index) -> dict:
         time.sleep(1)
 
         order_window.close()
-        logging.info(f"[중복방지] 미체결 CSV 저장: {save_path}")
 
         if not save_path.exists():
-            logging.info("[중복방지] 미체결 CSV 파일 없음.")
-            return {}
+            # 저장창은 떴지만 실제로 파일이 새로 생기지 않음 (예: 덮어쓰기 확인
+            # 등 추가 팝업을 처리 못해 저장이 완결되지 않음) — 실패로 처리.
+            raise Exception("미체결 CSV가 새로 생성되지 않음 — 저장이 실제로 완료되지 않은 것으로 추정.")
+
+        logging.info(f"[중복방지] 미체결 CSV 저장: {save_path}")
 
         result = {}
         df = None
@@ -226,13 +240,15 @@ def get_unfilled_tickers_dict(selected_user, account_index) -> dict:
                 break
             except Exception:
                 continue
-        if df is None or df.empty:
-            logging.info("[중복방지] 미체결 CSV 파싱 실패 또는 빈 파일.")
+        if df is None:
+            raise Exception("[중복방지] 방금 새로 저장된 미체결 CSV 파싱 실패 (인코딩 불일치).")
+        if df.empty:
+            # 방금 새로 저장된(확인된) 파일이 비어있는 것 — 진짜로 미체결이 없다고 봐도 안전.
+            logging.info("[중복방지] 미체결 CSV 비어있음 — 미체결 주문 없음으로 확인.")
             return {}
 
         if '종목코드' not in df.columns or '매매구분' not in df.columns:
-            logging.info(f"[중복방지] 미체결 CSV 컬럼 없음: {list(df.columns)}")
-            return {}
+            raise Exception(f"[중복방지] 미체결 CSV 컬럼 이상 (엉뚱한 화면이 저장됐을 가능성): {list(df.columns)}")
 
         df['종목코드'] = df['종목코드'].astype(str).str.replace(r'\.\w+$', '', regex=True).str.strip()
         for _, row in df.iterrows():
@@ -251,8 +267,8 @@ def get_unfilled_tickers_dict(selected_user, account_index) -> dict:
         return result
 
     except Exception as e:
-        logging.warning(f"[중복방지] 미체결 주문 조회 실패 (중복체크 스킵): {e}")
-        return {}
+        logging.error(f"[중복방지] 미체결 주문 조회 실패 — 호출부에서 안전하게 스킵되어야 함: {e}")
+        raise
     finally:
         block_input(False)
         logging.info(">>>>> 미체결 주문 조회 완료 <<<<<")

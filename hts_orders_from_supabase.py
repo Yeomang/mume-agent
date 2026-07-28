@@ -355,14 +355,24 @@ def hts_orders_from_supabase(
     logging.info(f"| 사용자 '{selected_user}' | HTS계좌순번 '{account_index}' | 활성 사이클: {[c['cycle_seq'] for c in active_cycles]}")
 
     # 중복 방지: 미체결 탭에서 현재 주문 상태 조회
-    # Day Order은 US 장 종료 시 자동 소멸 → 다음 날 미체결 탭에서 사라짐 → 오탐 없음
+    # 조회 자체가 실패하면(창을 못 찾음, CSV가 새로 안 써짐 등) 진짜 미체결 여부를
+    # 알 수 없는 상태이므로, 빈 dict로 넘기지 않고 전체 스킵한다 — 실거래 봇이라
+    # "확인 못 함"을 "미체결 없음"으로 오인해 중복 주문을 내는 쪽이 훨씬 위험함.
     _unfilled_dict = {}
+    _unfilled_check_failed = False
     if not is_test_mode:
         try:
             _unfilled_dict = get_unfilled_tickers_dict(selected_user, account_index)
             logging.info(f"[중복방지] 미체결 조회 완료: {list(_unfilled_dict.keys())}")
         except Exception as e:
-            logging.warning(f"[중복방지] 미체결 조회 실패 (중복체크 스킵): {e}")
+            _unfilled_check_failed = True
+            logging.error(f"[중복방지] 미체결 조회 실패 — 이번 실행의 전체 매도/매수를 안전하게 스킵합니다: {e}")
+            send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID,
+                f"🚨 *[{selected_user} | {account_index}번 계좌] 미체결 조회 실패*\n\n"
+                f"사유: {e}\n"
+                f"▶ 실제 미체결 상태를 확인할 수 없어 이번 실행의 매도/매수 주문을 전체 스킵합니다.\n"
+                f"▶ HTS에서 직접 미체결 탭을 확인해주세요."
+            )
 
     for iternum, cycle in enumerate(active_cycles, start=1):
         cycle_id = cycle["id"]
@@ -578,6 +588,11 @@ def hts_orders_from_supabase(
             sell_orders, buy_orders, order_type_index = _convert_orders_for_aftermarket(
                 sell_orders, buy_orders, ticker
             )
+
+        # 미체결 조회 자체가 실패했으면 진짜 상태를 모르는 것 — 안전하게 이 사이클 전체 스킵
+        if not is_test_mode and _unfilled_check_failed:
+            logging.info(f"[중복방지] 사이클 #{cycle_seq}: 미체결 조회 실패로 전체 스킵.")
+            continue
 
         # 중복 주문 방지: 루프 전 조회한 미체결 주문 기반으로 판단
         skip_sell = False
