@@ -229,7 +229,7 @@ def get_unfilled_tickers_dict(selected_user, account_index) -> dict:
             # 안 뜨고, 그래서 "다른 이름으로 저장" 창도 안 뜬다 — 이건 정상적인 "미체결 없음"
             # 케이스다. 저장 시도 전에 이미 기존 파일을 지워뒀으므로(위 unlink), 여기서
             # {}를 반환해도 스테일 파일을 재사용하는 원래 버그는 재발하지 않는다.
-            send_keys("{ESCAPE}")
+            send_keys("{ESC}")
             order_window.close()
             logging.info("[중복방지] '다른 이름으로 저장' 창 없음 — 그리드가 비어 미체결 주문 없음으로 확인.")
             return {}
