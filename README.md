@@ -4,7 +4,7 @@
 
 웹 콘솔([mume-console](../mume-console))에서 HTTP API로 제어하며, 스케줄 또는 수동으로 작업을 실행한다.
 
-> **최종 업데이트:** 2026-07-28
+> **최종 업데이트:** 2026-07-29
 
 ---
 
@@ -12,6 +12,7 @@
 
 | 날짜 | 내용 |
 |------|------|
+| 2026-07-29 | config.py: HTS_EXE_PATH 하드코딩 기본값을 실제 근거 없이 지어낸 값(C:\MeritzFire\iMeritz\imeritzmain.exe)에서 실제 확인된 설치 경로(C:\메리츠증권\iMERITZ XII\Main\imeritz.exe)로 수정. 새 서버(Lightsail)에 처음 배포할 때 imeritzmain.exe를 직접 실행하면 "실제 서버에서는 [imeritzmain] 로그인을 통하여 실행해주십시오" HTS 자체 팝업이 뜨며 멈추는 문제를 발견 — imeritz.exe(정식 런처)를 거친 적 없는 새 기기에서만 발생. 기존에 이미 DB(agent_settings.hts_exe_path)나 .env에 경로를 저장해둔 계정은 영향 없음, 신규 온보딩 시의 폴백 기본값만 변경됨 |
 | 2026-07-28 | get_unfilled_tickers_dict: 그리드가 비어 팝업이 안 떴을 때 보내던 send_keys("{ESC}")가, 열려있는 팝업이 없는 상태라 [06100] 주문 창 자체를 닫아버려 그 직후 order_window.close()가 ElementNotVisible로 실패하던 버그 수정. ESC 전송 제거 + 모든 order_window.close() 호출을 실패해도 무시하도록 방어 |
 | 2026-07-28 | get_unfilled_tickers_dict/hts_orders_from_supabase.py: 미체결 조회 실패 로그가 str(e)만 남겨 빈 문자열 예외(일부 COM 에러 등)의 원인을 알 수 없던 문제 수정. 예외 타입 + traceback을 함께 남기도록 로깅 보강 |
 | 2026-07-28 | get_unfilled_tickers_dict: send_keys("{ESCAPE}") 오타 수정 → "{ESC}" (pywinauto에서 정의되지 않은 코드라 "Unknown code: ESCAPE" 예외 발생). 이전엔 wait_for_window 버그로 이 분기가 실행된 적이 없어 드러나지 않다가, 그 버그를 고치자마자 처음 실행되며 발견됨 |
@@ -555,8 +556,8 @@ HTS_AGENT_KEY=your-secret-key
 # 콘솔 API URL (recompute 트리거 + order-status 정리용)
 CONSOLE_URL=https://your-app.vercel.app
 
-# HTS 실행 파일 경로 (기본값: C:\MeritzFire\iMeritz\imeritzmain.exe)
-HTS_EXE_PATH=C:\Program Files\Meritz\iMeritz\imeritz.exe
+# HTS 실행 파일 경로 (기본값: C:\메리츠증권\iMERITZ XII\Main\imeritz.exe — 실제 설치 경로는 다를 수 있으니 탐색기에서 확인 후 설정)
+HTS_EXE_PATH=C:\메리츠증권\iMERITZ XII\Main\imeritz.exe
 HTS_WINDOW_NAME=iMeritz
 
 # 텔레그램 알림 (DB에서 자동 로드되므로 선택)

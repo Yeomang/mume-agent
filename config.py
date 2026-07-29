@@ -35,7 +35,7 @@ class Config:
     TELEGRAM_BOT_TOKEN_EXECUTION = os.getenv("TELEGRAM_BOT_TOKEN_EXECUTION", "")
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
-    _DEFAULT_HTS_EXE_PATH = r"C:\MeritzFire\iMeritz\imeritzmain.exe"
+    _DEFAULT_HTS_EXE_PATH = r"C:\메리츠증권\iMERITZ XII\Main\imeritz.exe"
     HTS_EXE_PATH = os.getenv("HTS_EXE_PATH", "") or _DEFAULT_HTS_EXE_PATH
     HTS_WINDOW_NAME = os.getenv("HTS_WINDOW_NAME", "") or "iMeritz"
 
