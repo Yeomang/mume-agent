@@ -216,9 +216,11 @@ def _extract_order_list_v22(computed):
 
     if quarter_mode == "쿼터손절모드":
         logging.info("[쿼터손절모드]")
+        qn10_loc_sell_price = computed.get("qn10_loc_sell_price")
+        order_type_index_qn10_sell = 5 if qn10_loc_sell_price == "MOC매도" else 3
         sell_orders = [
             {"quantity": computed.get("q10_limit_sell_qty"), "price": computed.get("q10_limit_sell_price"), "order_type_index": 0},
-            {"quantity": computed.get("qn10_loc_sell_qty"), "price": computed.get("qn10_loc_sell_price"), "order_type_index": 3},
+            {"quantity": computed.get("qn10_loc_sell_qty"), "price": qn10_loc_sell_price, "order_type_index": order_type_index_qn10_sell},
         ]
         buy_orders = [
             {"quantity": computed.get("qn10_loc_buy_qty"), "price": computed.get("qn10_loc_buy_price")},
