@@ -638,10 +638,15 @@ def hts_orders_from_supabase(
                     or (_principal_val / _split_count_val if _split_count_val else 0)
                 )
                 _max_loc_price = max(float(o["price"]) for o in _zero_qty_buy_orders)
-                _recommended_principal = round(
-                    _max_loc_price / _per_buy_val * _principal_val if _per_buy_val > 0
-                    else _max_loc_price * _split_count_val
-                )
+                # qty=0인 이유가 "1회매수금액으로 1주도 못 사서"가 맞을 때만 원금부족 알림.
+                # 리버스모드 첫날(매수 없음이 설계), 쿼터매도 당일(그날은 매수시도 안 함) 등은
+                # 원금과 무관하게 의도적으로 qty=0이 계산되고, 이때도 가격 필드는 참고용으로
+                # 채워져 있어 이 조건이 없으면 오탐(허위 원금부족 알림)이 발생한다.
+                _actually_insufficient = _per_buy_val > 0 and _per_buy_val < _max_loc_price
+            else:
+                _actually_insufficient = False
+            if _actually_insufficient:
+                _recommended_principal = round(_max_loc_price / _per_buy_val * _principal_val)
                 _loc_prices_str = ", ".join([f"${float(o['price']):,.2f}" for o in _zero_qty_buy_orders])
                 send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID,
                     f"⚠️ *[무매사이클 #{cycle_seq}] 원금 부족 - 매수 주문 SKIP*\n\n"
