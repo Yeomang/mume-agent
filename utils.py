@@ -539,12 +539,23 @@ def send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message):
         "parse_mode": "Markdown"
     }
     try:
-        response = requests.post(url, json=payload)
+        response = requests.post(url, json=payload, timeout=15)
         response.raise_for_status()
+        # HTTP 200이어도 Telegram이 본문에서 ok:false로 실패를 알리는 경우가 있어
+        # (예: 잘못된 chat_id, 봇이 차단/추방된 경우 등) 상태코드만으로는 실제 전송
+        # 여부를 확신할 수 없다. 로그에는 "성공"으로 남는데 실제로는 안 온 것처럼
+        # 보이는 오탐을 막기 위해 응답 본문의 ok 필드도 반드시 확인한다.
+        data = response.json()
+        if not data.get("ok", False):
+            logging.error(f"텔레그램 알림 전송 실패 (API 응답 ok=false): {data}\n메시지: {message}")
+            return
         logging.info(f"텔레그램 알림 전송 성공:\n{message}")
     except requests.exceptions.RequestException as e:
-        logging.error(f"텔레그램 알림 전송 실패: {e}")
-        
+        body = getattr(e.response, "text", "") if getattr(e, "response", None) is not None else ""
+        logging.error(f"텔레그램 알림 전송 실패: {e}" + (f" | 응답: {body}" if body else ""))
+    except Exception as e:
+        logging.error(f"텔레그램 알림 전송 중 예기치 않은 오류: {e}\n메시지: {message}")
+
         
 def _now_et():
     """현재 미국 동부시간(ET) datetime 반환."""
