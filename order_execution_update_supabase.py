@@ -134,6 +134,8 @@ def _sync_order_status(sb, cycle_id: int, auth_user_id: str, all_orders_df, trad
                 order_cond = row.get("주문조건", "")
                 if order_cond == "LOC":
                     ot = "loc_buy" if side == "buy" else "loc_sell"
+                elif order_cond == "MOC":
+                    ot = "MOC"
                 else:
                     ot = "limit_buy" if side == "buy" else "limit_sell"
                 new_row = {
@@ -278,9 +280,9 @@ def orders_execution_update_supabase(
         _sorted_df = _sorted_df.sort_values(by='_price', ascending=False)
 
         def _fmt_exec_line(order):
-            price_str = f"${float(order['주문단가']):,.2f}"
-            qty_str = f"{int(order['주문수량'])}주"
             cond_str = order['주문조건']
+            price_str = "시장가" if cond_str == "MOC" else f"${float(order['주문단가']):,.2f}"
+            qty_str = f"{int(order['주문수량'])}주"
             exec_qty = int(order['체결수량'])
             if exec_qty == 0:
                 return f"   •  {price_str}  |  {qty_str}  |  {cond_str}  |  미체결"

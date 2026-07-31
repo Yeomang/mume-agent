@@ -674,11 +674,19 @@ def hts_orders_from_supabase(
                 df_order_history_filtered = df_order_history_filtered.copy()
                 df_order_history_filtered['_price'] = df_order_history_filtered['주문가'].apply(lambda x: float(str(x).replace(',', '')) if x else 0)
                 df_order_history_filtered = df_order_history_filtered.sort_values(by='_price', ascending=False)
+
+                def _fmt_order_history_line(row):
+                    if row['주문유형'] == 'MOC':
+                        price_str = "시장가"
+                    else:
+                        price_str = f"${float(str(row['주문가']).replace(',', '')):,.2f}"
+                    side_str = '-' if '매도' in row['매매구분'] else ''
+                    qty_str = f"{int(float(str(row['주문량']).replace(',', '')))}주"
+                    type_str = '지정가' if row['주문유형'] == '보통' else row['주문유형']
+                    return f"   •  {price_str}  |  {side_str}{qty_str}  |  {type_str}"
+
                 order_lines = "\n".join([
-                    f"   •  ${float(str(row['주문가']).replace(',', '')):,.2f}  |  "
-                    f"{'-' if '매도' in row['매매구분'] else ''}{int(float(str(row['주문량']).replace(',', '')))}주  |  "
-                    f"{'지정가' if row['주문유형'] == '보통' else row['주문유형']}"
-                    for _, row in df_order_history_filtered.iterrows()
+                    _fmt_order_history_line(row) for _, row in df_order_history_filtered.iterrows()
                 ])
 
                 # [개선] order_status를 HTS 실제 주문내역 CSV 기반으로 기록
