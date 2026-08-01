@@ -74,6 +74,61 @@ def _convert_orders_for_aftermarket(sell_orders, buy_orders, ticker):
     return new_sell_orders, new_buy_orders, 0  # order_type_index for buy = 0 (지정가)
 
 
+def _apply_reverse_price_guard(sell_orders, buy_orders, ticker, guard_rate):
+    """V4.0 리버스모드 주문가(별지점, 직전 5거래일 종가평균 기반)가 실시간가 대비
+    guard_rate% 를 넘게 벗어나면 브로커 거부(가격이 NBBO 대비 과도하게 이탈)를
+    피하기 위해 실시간가 기준 허용범위 안쪽으로 보정한다.
+
+    별지점 가격은 정의상 실시간가와 무관한 후행 지표라서, 시세가 급변하면
+    거부되는 걸 사전에 막을 방법이 없었다(2026-07-31 사이클 #294 매도 거부 사례).
+    MOC 등 숫자가 아닌 가격(문자열 라벨)은 건드리지 않는다.
+
+    Args:
+        sell_orders, buy_orders: 주문 리스트 (in-place 아님, 새 리스트 반환)
+        ticker: 종목코드
+        guard_rate: 허용 이탈폭(%). 사이클의 dip_buy_rate를 그대로 사용.
+
+    Returns:
+        (sell_orders, buy_orders, corrections: list[str])
+    """
+    live_price = _get_aftermarket_price(ticker)
+    if not live_price or live_price <= 0:
+        logging.warning(f"[가격보정] {ticker} 실시간가 조회 실패 — 보정 스킵, 계산가 그대로 사용")
+        return sell_orders, buy_orders, []
+
+    lower = round(live_price * (1 - guard_rate / 100), 2)
+    upper = round(live_price * (1 + guard_rate / 100), 2)
+    corrections: list = []
+
+    def _clamp(orders, side_label):
+        new_orders = []
+        for o in orders:
+            try:
+                price_num = float(o.get("price"))
+            except (TypeError, ValueError):
+                new_orders.append(o)
+                continue  # MOC 등 숫자가 아닌 가격은 그대로 둠
+            if price_num < lower:
+                corrections.append(
+                    f"▶ {side_label} ${price_num:,.2f} → ${lower:,.2f} "
+                    f"(실시간가 ${live_price:,.2f} 대비 -{guard_rate:.0f}% 하한)"
+                )
+                new_orders.append({**o, "price": lower})
+            elif price_num > upper:
+                corrections.append(
+                    f"▶ {side_label} ${price_num:,.2f} → ${upper:,.2f} "
+                    f"(실시간가 ${live_price:,.2f} 대비 +{guard_rate:.0f}% 상한)"
+                )
+                new_orders.append({**o, "price": upper})
+            else:
+                new_orders.append(o)
+        return new_orders
+
+    new_sell_orders = _clamp(sell_orders, "매도")
+    new_buy_orders = _clamp(buy_orders, "매수")
+    return new_sell_orders, new_buy_orders, corrections
+
+
 def _get_active_cycles(sb, selected_user, account_index, auth_user_ids=None, cycles=None):
     """cycle_master에서 활성 사이클 목록 조회"""
     from automation_target_store import get_auth_user_ids
@@ -542,6 +597,23 @@ def hts_orders_from_supabase(
             lambda *_: ([], [])
         )(computed)
 
+        # V4.0 리버스모드: 별지점 가격(5거래일 종가평균 기반)이 실시간가 대비
+        # 너무 벌어지면 브로커 거부(NBBO 이탈)를 피하기 위해 사전 보정
+        if method_ver == "V4.0" and computed.get("v4_mode") == "reverse":
+            _guard_rate = float(cycle.get("dip_buy_rate") or 15)
+            sell_orders, buy_orders, _price_guard_corrections = _apply_reverse_price_guard(
+                sell_orders, buy_orders, ticker, _guard_rate,
+            )
+            if _price_guard_corrections:
+                logging.info(f"[가격보정] 사이클 #{cycle_seq}: " + " / ".join(_price_guard_corrections))
+                send_telegram_message(
+                    Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID,
+                    f"⚠️ *[무매사이클 #{cycle_seq}] 리버스모드 가격 보정*\n\n"
+                    f"▶ 종목: {ticker}\n"
+                    + "\n".join(_price_guard_corrections)
+                    + f"\n\n실시간가 대비 {_guard_rate:.0f}% 이탈로 브로커 거부 방지를 위해 자동 보정했습니다."
+                )
+
         _raw_buy_orders = list(buy_orders)
 
         # 유효하지 않은 주문 필터링
@@ -688,6 +760,27 @@ def hts_orders_from_supabase(
                 order_lines = "\n".join([
                     _fmt_order_history_line(row) for _, row in df_order_history_filtered.iterrows()
                 ])
+
+                # [개선] 브로커 거부 주문 즉시 알림
+                # '상태'가 "거부"인 주문은 미체결(주문은 살아있으나 안 맞음)과 달리
+                # 애초에 브로커에 접수조차 안 된 것이라 별도로 알려야 한다.
+                # 기존엔 이 컬럼을 아예 안 봐서 거부돼도 조용히 넘어갔음
+                # (2026-07-31 사이클 #294 매도 거부가 아침까지 발견 안 된 사례).
+                if '상태' in df_order_history_filtered.columns:
+                    df_rejected = df_order_history_filtered[df_order_history_filtered['상태'] == '거부']
+                    if not df_rejected.empty:
+                        rejected_lines = "\n".join([
+                            f"▶ {row['매매구분']} {row['종목코드']} {row['주문량']}주 "
+                            f"@ ${float(str(row['주문가']).replace(',', '')):,.2f} ({row['주문유형']})"
+                            for _, row in df_rejected.iterrows()
+                        ])
+                        send_telegram_message(
+                            Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID,
+                            f"🚨 *[무매사이클 #{cycle_seq}] 주문 거부됨*\n\n"
+                            f"{rejected_lines}\n\n"
+                            f"▶ 브로커가 거부한 주문입니다 — HTS에서 사유 확인 필요\n"
+                            f"▶ (가격이 실시간가 대비 과도하게 벗어났을 가능성 등)"
+                        )
 
                 # [개선] order_status를 HTS 실제 주문내역 CSV 기반으로 기록
                 # 기존: 매도/매수 함수 직후 기록 → HTS에서 실제 접수 안 됐어도 "ordered" 기록

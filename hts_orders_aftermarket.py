@@ -162,6 +162,25 @@ def hts_orders_aftermarket(
         logging.info(f"종목코드 '{ticker}'에 해당하는 {len(filtered_df)}건의 데이터가 필터링되었습니다.")
         logging.info(f"[종목코드 '{ticker}' 내역 {len(filtered_df)}건]\n{filtered_df}")
 
+        # [개선] 브로커 거부 주문 알림
+        # 미체결(체결수량=0, 주문은 살아있음)과 거부(주문 자체가 브로커에 안 들어감)는
+        # 다른 상황인데 기존엔 '주문상태' 컬럼을 안 봐서 거부돼도 조용히 넘어갔음
+        # (2026-07-31 사이클 #294 매도 거부가 다음날 아침까지 발견 안 된 사례).
+        if '주문상태' in filtered_df.columns:
+            rejected_df = filtered_df[filtered_df['주문상태'] == '거부']
+            if not rejected_df.empty:
+                rejected_lines = "\n".join([
+                    f"▶ {row['주문구분']} {row['종목코드']} {row['주문수량']}주 @ ${row['주문단가']:,.2f}"
+                    for _, row in rejected_df.iterrows()
+                ])
+                send_telegram_message(
+                    Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID,
+                    f"🚨 *[무매사이클 #{cycle_seq}] 주문 거부됨*\n\n"
+                    f"{rejected_lines}\n\n"
+                    f"▶ 브로커가 거부한 주문입니다 — HTS에서 사유 확인 필요\n"
+                    f"▶ (가격이 실시간가 대비 과도하게 벗어났을 가능성 등)"
+                )
+
         # 체결 건수 확인 (매도+매수 전체)
         total_executed_qty = filtered_df['체결수량'].abs().sum()
 

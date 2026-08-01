@@ -4,7 +4,7 @@
 
 웹 콘솔([mume-console](../mume-console))에서 HTTP API로 제어하며, 스케줄 또는 수동으로 작업을 실행한다.
 
-> **최종 업데이트:** 2026-07-29
+> **최종 업데이트:** 2026-08-01
 
 ---
 
@@ -12,6 +12,7 @@
 
 | 날짜 | 내용 |
 |------|------|
+| 2026-08-01 | V4.0 리버스모드 매도/매수 주문가(직전 5거래일 종가평균 기반)가 실시간가 대비 사이클 설정값(`dip_buy_rate`, 기본 15%)을 넘게 벌어지면 브로커 거부(NBBO 이탈)를 막기 위해 실시간가 기준으로 자동 보정하는 `_apply_reverse_price_guard()` 추가(`hts_orders_from_supabase.py`) — 2026-07-31 사이클 #294에서 매도 주문이 "96.54>24.88% Limit 20.00% thru nbbo" 사유로 브로커 거부됐는데 아무도 알지 못했던 사례가 계기. 저녁/애프터마켓 양쪽에서 브로커 거부("주문상태"="거부") 주문을 즉시 텔레그램으로 알림하도록 추가 — 기존엔 이 상태를 아예 안 봐서 거부돼도 조용히 넘어갔음. 짝을 이루는 mume-console 수정: V3.0 쿼터매도 진입 첫날 매도(MOC)+매수(LOC)가 동시에 나가던 버그(`calc_engine.py`) |
 | 2026-07-29 | config.py: HTS_EXE_PATH 하드코딩 기본값을 실제 근거 없이 지어낸 값(C:\MeritzFire\iMeritz\imeritzmain.exe)에서 실제 확인된 설치 경로(C:\메리츠증권\iMERITZ XII\Main\imeritz.exe)로 수정. 새 서버(Lightsail)에 처음 배포할 때 imeritzmain.exe를 직접 실행하면 "실제 서버에서는 [imeritzmain] 로그인을 통하여 실행해주십시오" HTS 자체 팝업이 뜨며 멈추는 문제를 발견 — imeritz.exe(정식 런처)를 거친 적 없는 새 기기에서만 발생. 기존에 이미 DB(agent_settings.hts_exe_path)나 .env에 경로를 저장해둔 계정은 영향 없음, 신규 온보딩 시의 폴백 기본값만 변경됨 |
 | 2026-07-28 | get_unfilled_tickers_dict: 그리드가 비어 팝업이 안 떴을 때 보내던 send_keys("{ESC}")가, 열려있는 팝업이 없는 상태라 [06100] 주문 창 자체를 닫아버려 그 직후 order_window.close()가 ElementNotVisible로 실패하던 버그 수정. ESC 전송 제거 + 모든 order_window.close() 호출을 실패해도 무시하도록 방어 |
 | 2026-07-28 | get_unfilled_tickers_dict/hts_orders_from_supabase.py: 미체결 조회 실패 로그가 str(e)만 남겨 빈 문자열 예외(일부 COM 에러 등)의 원인을 알 수 없던 문제 수정. 예외 타입 + traceback을 함께 남기도록 로깅 보강 |
