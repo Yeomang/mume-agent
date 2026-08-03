@@ -25,7 +25,13 @@ from datetime import timezone as _tz, timedelta as _td
 
 
 def _get_aftermarket_price(ticker: str) -> float | None:
-    """yfinance로 현재 애프터마켓/정규장 가격 조회."""
+    """yfinance로 현재 애프터마켓/정규장 가격 조회.
+
+    주의: fast_info.last_price는 장 시작 전/주말 등 시세 갱신 전 구간에서
+    직전 종가를 그대로 반환하는 경우가 있다 (실시간가 아님). HTS 잔고 CSV의
+    실제 브로커 시세를 구할 수 있으면 _get_live_price()에서 이 함수보다
+    우선 사용한다.
+    """
     try:
         t = yf.Ticker(ticker)
         info = t.fast_info if hasattr(t, "fast_info") else t.info
@@ -36,7 +42,26 @@ def _get_aftermarket_price(ticker: str) -> float | None:
         return None
 
 
-def _convert_orders_for_aftermarket(sell_orders, buy_orders, ticker):
+def _get_live_price(ticker: str, hts_current_price=None) -> float | None:
+    """실시간가를 구한다. HTS 잔고 CSV의 실제 브로커 시세(hts_current_price)가
+    있으면 그것을 우선 사용하고, 없으면(신규 사이클 등 CSV에 값이 없는 경우)
+    yfinance(_get_aftermarket_price)로 폴백한다.
+
+    HTS CSV 값은 브로커가 직접 내려준 잔고 기준 현재가라서, 장 시작 전/주말
+    등의 구간에서 직전 종가를 반환할 수 있는 yfinance fast_info보다 신뢰도가
+    높다.
+    """
+    try:
+        if hts_current_price not in (None, "", 0, "0"):
+            price = float(hts_current_price)
+            if price > 0:
+                return price
+    except (TypeError, ValueError):
+        pass
+    return _get_aftermarket_price(ticker)
+
+
+def _convert_orders_for_aftermarket(sell_orders, buy_orders, ticker, hts_current_price=None):
     """장 마감 후: LOC/MOC 주문을 지정가로 변환.
 
     - LOC매도(3) → 지정가매도(0), 같은 가격 유지
@@ -44,7 +69,7 @@ def _convert_orders_for_aftermarket(sell_orders, buy_orders, ticker):
     - LOC매수(3) → 지정가매수(0), 현재가 × 1.03
     - 지정가매도(0) → 변경 없음
     """
-    current_price = _get_aftermarket_price(ticker)
+    current_price = _get_live_price(ticker, hts_current_price)
     if current_price is None:
         logging.warning(f"[aftermarket] {ticker} 현재가를 조회할 수 없어 LOC/MOC 주문을 변환할 수 없습니다.")
         return sell_orders, buy_orders, 0  # 변환 실패 → 원본 그대로 (HTS에서 거부될 수 있음)
@@ -74,24 +99,34 @@ def _convert_orders_for_aftermarket(sell_orders, buy_orders, ticker):
     return new_sell_orders, new_buy_orders, 0  # order_type_index for buy = 0 (지정가)
 
 
-def _apply_reverse_price_guard(sell_orders, buy_orders, ticker, guard_rate):
-    """V4.0 리버스모드 주문가(별지점, 직전 5거래일 종가평균 기반)가 실시간가 대비
-    guard_rate% 를 넘게 벗어나면 브로커 거부(가격이 NBBO 대비 과도하게 이탈)를
+def _apply_price_guard(sell_orders, buy_orders, ticker, guard_rate, is_reverse_mode, hts_current_price=None):
+    """LOC 매도가(별%LOC매도가/-10%LOC매도가 등, 평단가 기반 후행 지표)가 실시간가
+    대비 guard_rate% 를 넘게 벗어나면 브로커 거부(가격이 NBBO 대비 과도하게 이탈)를
     피하기 위해 실시간가 기준 허용범위 안쪽으로 보정한다.
 
-    별지점 가격은 정의상 실시간가와 무관한 후행 지표라서, 시세가 급변하면
-    거부되는 걸 사전에 막을 방법이 없었다(2026-07-31 사이클 #294 매도 거부 사례).
-    MOC 등 숫자가 아닌 가격(문자열 라벨)은 건드리지 않는다.
+    평단가 기반 매도가는 정의상 실시간가와 무관한 후행 지표라서, 시세가 급변하면
+    거부되는 걸 막을 방법이 없다(2026-07-31 사이클 #294 매도 거부 사례로 최초 발견,
+    이후 리버스모드 전용이 아니라 일반모드/쿼터손절모드 LOC매도에도 동일한 위험이
+    있음을 확인해 전체 LOC매도로 범위를 넓힘). 매수 쪽은 평단LOC/별%LOC가 실시간가
+    기준인 큰수매수가(dip_buy_price)보다 벌어지면 수량이 0으로 걸러지는 자체 안전
+    장치가 있어 이 가드의 대상이 아니다 — 단, 리버스모드는 예외로, 별지점 매수가가
+    "별지점 매도가 - 0.01"로 짝지어져 있어 매도가 보정 시 매수가도 함께 보정해야
+    한다(그렇지 않으면 두 주문이 같은 가격으로 겹쳐 스프레드가 사라짐).
+
+    order_type_index == 3(LOC)인 매도 주문만 대상으로 한다. 지정가(0)/MOC(5, 숫자
+    아닌 라벨)는 건드리지 않는다.
 
     Args:
         sell_orders, buy_orders: 주문 리스트 (in-place 아님, 새 리스트 반환)
         ticker: 종목코드
         guard_rate: 허용 이탈폭(%). 사이클의 dip_buy_rate를 그대로 사용.
+        is_reverse_mode: V4.0 리버스모드 여부 (매수가 연동 보정 대상인지 판단용)
+        hts_current_price: HTS 잔고 CSV에서 이미 조회된 실시간가 (있으면 우선 사용)
 
     Returns:
         (sell_orders, buy_orders, corrections: list[str])
     """
-    live_price = _get_aftermarket_price(ticker)
+    live_price = _get_live_price(ticker, hts_current_price)
     if not live_price or live_price <= 0:
         logging.warning(f"[가격보정] {ticker} 실시간가 조회 실패 — 보정 스킵, 계산가 그대로 사용")
         return sell_orders, buy_orders, []
@@ -100,32 +135,54 @@ def _apply_reverse_price_guard(sell_orders, buy_orders, ticker, guard_rate):
     upper = round(live_price * (1 + guard_rate / 100), 2)
     corrections: list = []
 
-    def _clamp(orders, side_label):
-        new_orders = []
-        for o in orders:
+    new_sell_orders = []
+    corrected_sell_price = None  # 클램프가 실제로 발동된 경우의 보정된 매도가
+    for o in sell_orders:
+        if o.get("order_type_index") != 3:
+            new_sell_orders.append(o)  # 지정가/MOC는 대상 아님
+            continue
+        try:
+            price_num = float(o.get("price"))
+        except (TypeError, ValueError):
+            new_sell_orders.append(o)
+            continue  # MOC 라벨 등 숫자가 아닌 가격은 그대로 둠
+        if price_num < lower:
+            corrections.append(
+                f"▶ 매도 ${price_num:,.2f} → ${lower:,.2f} "
+                f"(실시간가 ${live_price:,.2f} 대비 -{guard_rate:.0f}% 하한)"
+            )
+            new_sell_orders.append({**o, "price": lower})
+            corrected_sell_price = lower
+        elif price_num > upper:
+            corrections.append(
+                f"▶ 매도 ${price_num:,.2f} → ${upper:,.2f} "
+                f"(실시간가 ${live_price:,.2f} 대비 +{guard_rate:.0f}% 상한)"
+            )
+            new_sell_orders.append({**o, "price": upper})
+            corrected_sell_price = upper
+        else:
+            new_sell_orders.append(o)
+
+    if is_reverse_mode and corrected_sell_price is not None:
+        # 리버스모드: 별지점 매수가는 "매도가 - 0.01"로 짝지어져 있으므로
+        # 독립적으로 클램프하지 않고 보정된 매도가에서 파생한다.
+        derived_buy_price = round(corrected_sell_price - 0.01, 2)
+        new_buy_orders = []
+        for o in buy_orders:
             try:
                 price_num = float(o.get("price"))
             except (TypeError, ValueError):
-                new_orders.append(o)
-                continue  # MOC 등 숫자가 아닌 가격은 그대로 둠
-            if price_num < lower:
-                corrections.append(
-                    f"▶ {side_label} ${price_num:,.2f} → ${lower:,.2f} "
-                    f"(실시간가 ${live_price:,.2f} 대비 -{guard_rate:.0f}% 하한)"
-                )
-                new_orders.append({**o, "price": lower})
-            elif price_num > upper:
-                corrections.append(
-                    f"▶ {side_label} ${price_num:,.2f} → ${upper:,.2f} "
-                    f"(실시간가 ${live_price:,.2f} 대비 +{guard_rate:.0f}% 상한)"
-                )
-                new_orders.append({**o, "price": upper})
-            else:
-                new_orders.append(o)
-        return new_orders
+                new_buy_orders.append(o)
+                continue  # 리버스모드에서 비활성인 평단LOC/큰수매수(빈 값)는 그대로 둠
+            corrections.append(
+                f"▶ 매수 ${price_num:,.2f} → ${derived_buy_price:,.2f} "
+                f"(보정된 매도가 − $0.01, 별지점 스프레드 유지)"
+            )
+            new_buy_orders.append({**o, "price": derived_buy_price})
+    else:
+        # 일반모드/쿼터손절모드: 매수는 건드리지 않는다 (큰수매수가 이미 보호).
+        new_buy_orders = buy_orders
 
-    new_sell_orders = _clamp(sell_orders, "매도")
-    new_buy_orders = _clamp(buy_orders, "매수")
     return new_sell_orders, new_buy_orders, corrections
 
 
@@ -597,22 +654,24 @@ def hts_orders_from_supabase(
             lambda *_: ([], [])
         )(computed)
 
-        # V4.0 리버스모드: 별지점 가격(5거래일 종가평균 기반)이 실시간가 대비
-        # 너무 벌어지면 브로커 거부(NBBO 이탈)를 피하기 위해 사전 보정
-        if method_ver == "V4.0" and computed.get("v4_mode") == "reverse":
-            _guard_rate = float(cycle.get("dip_buy_rate") or 15)
-            sell_orders, buy_orders, _price_guard_corrections = _apply_reverse_price_guard(
-                sell_orders, buy_orders, ticker, _guard_rate,
+        # LOC 매도가(별%LOC/-10%LOC 등, 평단가 기반 후행 지표)가 실시간가 대비
+        # 너무 벌어지면 브로커 거부(NBBO 이탈)를 피하기 위해 사전 보정.
+        # 리버스모드뿐 아니라 일반모드/쿼터손절모드의 LOC매도에도 동일한
+        # 위험이 있어 방법론/모드 무관하게 적용한다 (지정가/MOC는 대상 아님).
+        _is_reverse_mode = method_ver == "V4.0" and computed.get("v4_mode") == "reverse"
+        _guard_rate = float(cycle.get("dip_buy_rate") or 15)
+        sell_orders, buy_orders, _price_guard_corrections = _apply_price_guard(
+            sell_orders, buy_orders, ticker, _guard_rate, _is_reverse_mode, current_price,
+        )
+        if _price_guard_corrections:
+            logging.info(f"[가격보정] 사이클 #{cycle_seq}: " + " / ".join(_price_guard_corrections))
+            send_telegram_message(
+                Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID,
+                f"⚠️ *[무매사이클 #{cycle_seq}] LOC 매도가 보정*\n\n"
+                f"▶ 종목: {ticker} ({method_ver}{' 리버스모드' if _is_reverse_mode else ''})\n"
+                + "\n".join(_price_guard_corrections)
+                + f"\n\n실시간가 대비 {_guard_rate:.0f}% 이탈로 브로커 거부 방지를 위해 자동 보정했습니다."
             )
-            if _price_guard_corrections:
-                logging.info(f"[가격보정] 사이클 #{cycle_seq}: " + " / ".join(_price_guard_corrections))
-                send_telegram_message(
-                    Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID,
-                    f"⚠️ *[무매사이클 #{cycle_seq}] 리버스모드 가격 보정*\n\n"
-                    f"▶ 종목: {ticker}\n"
-                    + "\n".join(_price_guard_corrections)
-                    + f"\n\n실시간가 대비 {_guard_rate:.0f}% 이탈로 브로커 거부 방지를 위해 자동 보정했습니다."
-                )
 
         _raw_buy_orders = list(buy_orders)
 
@@ -661,7 +720,7 @@ def hts_orders_from_supabase(
                 continue
             logging.info("═══ 애프터마켓 모드: 정규장 마감 후 실행. LOC/MOC → 지정가 전환 ═══")
             sell_orders, buy_orders, order_type_index = _convert_orders_for_aftermarket(
-                sell_orders, buy_orders, ticker
+                sell_orders, buy_orders, ticker, current_price
             )
 
         # 미체결 조회 자체가 실패했으면 진짜 상태를 모르는 것 — 안전하게 이 사이클 전체 스킵
