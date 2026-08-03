@@ -338,7 +338,13 @@ def orders_execution_update_supabase(
             _t_display = f"{float(_t_value):.1f}T" if _t_value else "0T"
             _progress_display = f"{_progress_rate * 100:.1f}%" if _progress_rate and abs(_progress_rate) <= 1 else f"{_progress_rate:.1f}%"
             _pnl_sign = "+" if _cumulative_pnl >= 0 else ""
-            return _computed, _t_display, _progress_display, _per_buy, _cumulative_pnl, _comp_avg, _pnl_sign
+            _mode_label = method_ver + (" 리버스모드" if method_ver == "V4.0" and _computed.get("v4_mode") == "reverse" else "")
+            _quarter_progress = ""
+            if method_ver == "V2.2" and _computed.get("quarter_mode") == "쿼터손절모드":
+                _quarter_progress = f" (쿼터손절모드 {_computed.get('quarter_progress', 0)}/10회)"
+            elif method_ver in ("V3.0", "V4.0") and _computed.get("in_quarter"):
+                _quarter_progress = " (쿼터매도기간)"
+            return _computed, _t_display, _progress_display, _per_buy, _cumulative_pnl, _comp_avg, _pnl_sign, _mode_label, _quarter_progress
 
         # 텔레그램 메시지는 INSERT+recompute 후에 전송 (체결 후 computed 사용)
         _telegram_context = {
@@ -467,22 +473,22 @@ def orders_execution_update_supabase(
                 )
 
         # ── 텔레그램 메시지 전송 (INSERT+recompute 후 — 체결 후 computed 사용) ──
-        _, _t_display, _progress_display, _per_buy, _cumulative_pnl, _, _pnl_sign = _load_computed_for_telegram()
+        _, _t_display, _progress_display, _per_buy, _cumulative_pnl, _, _pnl_sign, _mode_label, _quarter_progress = _load_computed_for_telegram()
         _ctx = _telegram_context
 
         if _ctx["is_rerun"] and _ctx["added_count"] <= 0:
             send_telegram_message(Config.TELEGRAM_BOT_TOKEN_EXECUTION, Config.TELEGRAM_CHAT_ID,
                 f"💵 *[무매사이클 #{cycle_seq}] 추가 체결 없음*\n\n"
                 f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
-                f"▶ 종목: *{ticker} ({method_ver})*")
+                f"▶ 종목: *{ticker} ({_mode_label})*")
         elif _ctx["is_rerun"] and _ctx["added_count"] > 0:
             send_telegram_message(Config.TELEGRAM_BOT_TOKEN_EXECUTION, Config.TELEGRAM_CHAT_ID,
                 f"💵 *[무매사이클 #{cycle_seq}] 추가 체결 {_ctx['added_count']}건*\n\n"
                 f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
-                f"▶ 종목: *{ticker} ({method_ver})*\n"
+                f"▶ 종목: *{ticker} ({_mode_label})*\n"
                 f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | 1회매수금: ${_per_buy:,.0f}\n"
                 f"▶ 시작일: {_start_date}\n"
-                f"▶ 진행률: {_progress_display} ({_t_display})\n"
+                f"▶ 진행률: {_progress_display} ({_t_display}){_quarter_progress}\n"
                 f"▶ 실현손익금: {_pnl_sign}${abs(_cumulative_pnl):,.2f}\n"
                 f"▶ 실제 HTS 체결내역\n"
                 f"{_ctx['formatted_orders']}")
@@ -498,10 +504,10 @@ def orders_execution_update_supabase(
                     f"💵 *[무매사이클 #{cycle_seq}] 매매 체결 내역*\n\n"
                     f"▶ {inquiry_start_date}~{inquiry_end_date}\n"
                     f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
-                    f"▶ 종목: *{ticker} ({method_ver})*\n"
+                    f"▶ 종목: *{ticker} ({_mode_label})*\n"
                     f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | 1회매수금: ${_per_buy:,.0f}\n"
                     f"▶ 시작일: {_start_date}\n"
-                    f"▶ 보유수량: {balance_from_hts}주 | 진행률: {_progress_display} ({_t_display})\n"
+                    f"▶ 보유수량: {balance_from_hts}주 | 진행률: {_progress_display} ({_t_display}){_quarter_progress}\n"
                     f"▶ 현재가: ${current_price} | 평단가: ${average_price}\n"
                     f"▶ 평가손익: ${profit} ({profit_rate}%)\n"
                     f"▶ 실현손익금: {_pnl_sign}${abs(_cumulative_pnl):,.2f}\n"
@@ -512,10 +518,10 @@ def orders_execution_update_supabase(
                     f"💵 *[무매사이클 #{cycle_seq}] 매매 체결 내역*\n\n"
                     f"▶ {inquiry_start_date}~{inquiry_end_date}\n"
                     f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
-                    f"▶ 종목: *{ticker} ({method_ver})*\n"
+                    f"▶ 종목: *{ticker} ({_mode_label})*\n"
                     f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | 1회매수금: ${_per_buy:,.0f}\n"
                     f"▶ 시작일: {_start_date}\n"
-                    f"▶ 진행률: {_progress_display} ({_t_display})\n"
+                    f"▶ 진행률: {_progress_display} ({_t_display}){_quarter_progress}\n"
                     f"▶ 실현손익금: {_pnl_sign}${abs(_cumulative_pnl):,.2f}\n"
                     f"▶ 현재 해당종목의 잔고 없음\n"
                     f"▶ 실제 HTS 체결내역\n"
@@ -526,10 +532,10 @@ def orders_execution_update_supabase(
                 f"💵 *[무매사이클 #{cycle_seq}] 매매 체결 내역*\n\n"
                 f"▶ {inquiry_start_date}~{inquiry_end_date}\n"
                 f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
-                f"▶ 종목: *{ticker} ({method_ver})*\n"
+                f"▶ 종목: *{ticker} ({_mode_label})*\n"
                 f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | 1회매수금: ${_per_buy:,.0f}\n"
                 f"▶ 시작일: {_start_date}\n"
-                f"▶ 진행률: {_progress_display} ({_t_display})\n"
+                f"▶ 진행률: {_progress_display} ({_t_display}){_quarter_progress}\n"
                 f"▶ 실현손익금: {_pnl_sign}${abs(_cumulative_pnl):,.2f}\n"
                 f"▶ (보유잔고 조회 실패)\n"
                 f"▶ 실제 HTS 체결내역\n"

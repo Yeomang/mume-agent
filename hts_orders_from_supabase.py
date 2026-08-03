@@ -515,6 +515,11 @@ def hts_orders_from_supabase(
         if not computed:
             logging.info(f"사이클 #{cycle_seq}의 계산 데이터가 없습니다. 첫 주문(시작전 상태) 실행.")
 
+        # 텔레그램 메시지용 방법론 라벨 — V4.0 리버스모드는 별도 표시
+        # (일반모드와 매매 로직이 크게 달라서 리버스모드 여부를 모르면 주문 내역만
+        # 보고는 판단이 안 됨. 리버스모드에서만 "리버스모드"를 덧붙인다)
+        _mode_label = method_ver + (" 리버스모드" if method_ver == "V4.0" and computed.get("v4_mode") == "reverse" else "")
+
         progress_rate_raw = computed.get("progress_rate", 0)
         progress_rate = f"{progress_rate_raw * 100:.1f}%"
         holding_qty_from_db = computed.get("holding_qty", 0)
@@ -526,6 +531,11 @@ def hts_orders_from_supabase(
             if quarter_mode == "쿼터손절모드":
                 quarter_rate = computed.get("quarter_progress", 0)
                 quarter_progress = f" (쿼터손절모드 {quarter_rate}/10회)"
+        elif method_ver in ("V3.0", "V4.0") and computed.get("in_quarter"):
+            # 쿼터매도기간: 별%LOC매도가 MOC로 전환되는 사이클 종료 임박 구간.
+            # V4.0은 같은 T값 시점에 리버스모드가 먼저 선점해서 실제로는 거의
+            # 발생하지 않지만(리버스모드 미진입 시 대비) 방어적으로 표시.
+            quarter_progress = " (쿼터매도기간)"
 
         # HTS 잔고 CSV와 DB 보유수 비교
         logging.info("HTS로부터 가져온 해외주식 보유잔고 데이터와 DB에 기록된 최신 보유수가 일치하는지 확인중...")
@@ -561,7 +571,7 @@ def hts_orders_from_supabase(
                     message = (
                         f"📉 *[무매사이클 #{cycle_seq}] 주문 실패❌*\n\n"
                         f"▶ 계좌: {selected_user} | 메리츠 | {account_index}번째 계좌\n"
-                        f"▶ 종목: {ticker} ({method_ver})\n"
+                        f"▶ 종목: {ticker} ({_mode_label})\n"
                         f"▶ 보유수량: {balance_from_hts}주\n"
                         f"▶ 진행률: {progress_rate}{quarter_progress}\n"
                         f"▶ 평가금액: ${eval_amount} | 총매입금액: ${purchase_amount}\n"
@@ -578,7 +588,7 @@ def hts_orders_from_supabase(
                     logging.warning(f"[경고] 종목코드 '{ticker}' 가 df_balance에 존재하지 않지만 DB 보유수는 {holding_qty_from_db}주. 스킵합니다.")
                     send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID,
                         f"⚠️ *[무매사이클 #{cycle_seq}] 잔고 확인 불가*\n\n"
-                        f"▶ 종목: {ticker} ({method_ver})\n"
+                        f"▶ 종목: {ticker} ({_mode_label})\n"
                         f"▶ DB 보유수: {holding_qty_from_db}주\n"
                         f"▶ HTS 잔고 CSV에 해당 종목 없음\n"
                         f"▶ 잔고 확인 불가로 주문을 건너뜁니다."
@@ -592,7 +602,7 @@ def hts_orders_from_supabase(
                 logging.warning(f"해외주식 보유잔고 CSV 파일이 없고 DB 보유수는 {holding_qty_from_db}주. 진행중 사이클이므로 스킵합니다.")
                 send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID,
                     f"⚠️ *[무매사이클 #{cycle_seq}] 잔고 CSV 없음*\n\n"
-                    f"▶ 종목: {ticker} ({method_ver})\n"
+                    f"▶ 종목: {ticker} ({_mode_label})\n"
                     f"▶ DB 보유수: {holding_qty_from_db}주\n"
                     f"▶ 보유잔고 CSV 저장 실패로 잔고 확인 불가\n"
                     f"▶ 주문을 건너뜁니다."
@@ -668,7 +678,7 @@ def hts_orders_from_supabase(
             send_telegram_message(
                 Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID,
                 f"⚠️ *[무매사이클 #{cycle_seq}] LOC 매도가 보정*\n\n"
-                f"▶ 종목: {ticker} ({method_ver}{' 리버스모드' if _is_reverse_mode else ''})\n"
+                f"▶ 종목: {ticker} ({_mode_label})\n"
                 + "\n".join(_price_guard_corrections)
                 + f"\n\n실시간가 대비 {_guard_rate:.0f}% 이탈로 브로커 거부 방지를 위해 자동 보정했습니다."
             )
@@ -713,7 +723,7 @@ def hts_orders_from_supabase(
                 logging.warning("═══ 애프터마켓 시간 초과 (ET 19:50 이후): 주문 불가. 이 사이클을 건너뜁니다. ═══")
                 send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID,
                     f"⚠️ *[무매사이클 #{cycle_seq}] 주문 불가*\n\n"
-                    f"▶ 종목: {ticker} ({method_ver})\n"
+                    f"▶ 종목: {ticker} ({_mode_label})\n"
                     f"▶ 사유: 애프터마켓 시간(ET 16:00~19:50) 초과\n"
                     f"▶ 다음 거래일 evening job에서 자동 실행됩니다."
                 )
@@ -782,7 +792,7 @@ def hts_orders_from_supabase(
                 send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID,
                     f"⚠️ *[무매사이클 #{cycle_seq}] 원금 부족 - 매수 주문 SKIP*\n\n"
                     f"▶ 계좌: {selected_user} | 메리츠 | {account_index}번째 계좌\n"
-                    f"▶ 종목: *{ticker}* ({method_ver})\n"
+                    f"▶ 종목: *{ticker}* ({_mode_label})\n"
                     f"▶ 1회매수금액: *${_per_buy_val:,.2f}*\n"
                     f"▶ LOC 주문가: {_loc_prices_str}\n"
                     f"→ 1회매수금액으로 1주도 매수 불가\n\n"
@@ -879,7 +889,7 @@ def hts_orders_from_supabase(
         message = (
             f"📝 *[무매사이클 #{cycle_seq}] 매매 주문 내역*\n\n"
             f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
-            f"▶ 종목: *{ticker} ({method_ver})*\n"
+            f"▶ 종목: *{ticker} ({_mode_label})*\n"
             f"▶ 원금: ${principal:,.0f} | {split_count}분할 | 1회매수금: ${per_buy_val:,.0f}\n"
             f"▶ 시작일: {start_date}\n"
             f"▶ 보유수량: {balance_from_hts}주 | 진행률: {progress_rate} ({t_display}){quarter_progress}\n"
