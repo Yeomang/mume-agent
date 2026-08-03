@@ -187,11 +187,8 @@ def _sync_cash_balance_to_db(user: str, account_index: int):
                 "user_name": user,
                 "account_index": account_index,
                 "currency": currency,
-                "deposit": parse_num(row.get("외화예수금")),
                 "estimated_deposit": parse_num(row.get("외화추정예수금")),
                 "exchange_rate": parse_num(row.get("기준환율")),
-                "krw_value": parse_num(row.get("원화평가금액(\\)")),
-                "withdrawable": parse_num(row.get("출금가능금액")),
                 "updated_at": "now()",
             }
             sb.table("account_cash_balance").upsert(
