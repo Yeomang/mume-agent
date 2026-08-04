@@ -4,6 +4,7 @@ from pywinauto import Application
 import time
 from pywinauto.keyboard import send_keys
 import logging
+import datetime as dt
 from pathlib import Path
 import os
 
@@ -17,6 +18,42 @@ AUTO_ID_INQUIRY_BUTTON = "3810"  # 조회 버튼 automation_id (6104의 3815와 
 AUTO_ID_NEXT_BUTTON = "3815"  # '다음' 버튼 automation_id — 조회 결과가 화면 최대치를 넘으면 눌러야 추가 데이터가 이어붙여짐
 AUTO_ID_TABLE_DAILY_RETURN = "3825"  # 일별 계좌수익률 데이터 테이블 automation_id
 MAX_NEXT_CLICKS = 60  # '다음' 버튼 무한루프 방지용 안전 상한. 최근 2년 이내만 조회 가능하므로 충분한 값.
+
+# HTS [2363] 화면의 실제 조회 가능 상한은 "정확히 2년 전"보다 살짝 타이트하다.
+# 실측(기준일 2026-08-04): 시작일 2024-08-05(729일 전)는 "최대 2년까지 조회 가능합니다" 에러,
+# 2024-08-06(728일 전)는 정상. 매년 윤년 위치가 달라져 정확한 경계가 흔들릴 수 있으므로
+# 여유를 두고 720일(약 1년 11.5개월)을 상한으로 클램프한다.
+MAX_LOOKBACK_DAYS = 720
+
+
+def _clamp_inquiry_range(inquiry_start_date: str, inquiry_end_date: str) -> tuple[str, str]:
+    """조회기간 시작일이 HTS [2363] 화면의 최대 조회 가능 범위를 넘으면 안전하게 당겨준다.
+
+    시작일 입력 필드에 2년을 넘는 날짜를 입력하는 순간(조회 버튼을 누르기도 전에) HTS가
+    "최대 2년까지 조회 가능합니다" 에러 팝업을 바로 띄운다. 이 팝업은 코드에서 처리하지
+    않으므로 이후 컨트롤 탐색이 전부 실패하며 자동화가 깨진다 — 애초에 그 값을 입력하지
+    않도록 여기서 막는다.
+    입출력 모두 yyyymmdd 문자열.
+    """
+    cutoff = dt.date.today() - dt.timedelta(days=MAX_LOOKBACK_DAYS)
+    start = dt.datetime.strptime(inquiry_start_date, "%Y%m%d").date()
+    end = dt.datetime.strptime(inquiry_end_date, "%Y%m%d").date()
+
+    if end < cutoff:
+        raise Exception(
+            f"요청한 조회기간({inquiry_start_date}~{inquiry_end_date})이 HTS 최대 조회 가능 범위"
+            f"(최근 {MAX_LOOKBACK_DAYS}일, {cutoff.strftime('%Y%m%d')} 이후)를 완전히 벗어났습니다."
+        )
+
+    if start < cutoff:
+        clamped = cutoff.strftime("%Y%m%d")
+        logging.warning(
+            f"조회 시작일({inquiry_start_date})이 HTS 최대 조회 가능 범위를 벗어나 "
+            f"{clamped}로 보정합니다 (HTS 실측상 2년 전후로 '최대 2년까지 조회 가능' 에러 발생)."
+        )
+        inquiry_start_date = clamped
+
+    return inquiry_start_date, inquiry_end_date
 
 
 @with_desktop_retry
@@ -72,6 +109,7 @@ def save_data_daily_return(selected_user, account_index, inquiry_start_date=None
     # 매일 실행하는 정상 케이스는 겹치는 날짜를 콘솔에서 upsert로 덮어쓰므로 날짜 범위를 조작할 필요 없음.
     # 과거 데이터를 직접 보충하고 싶을 때(콘솔 수동 실행)만 inquiry_start_date/inquiry_end_date를 지정.
     if inquiry_start_date and inquiry_end_date:
+        inquiry_start_date, inquiry_end_date = _clamp_inquiry_range(inquiry_start_date, inquiry_end_date)
         start_date_input = find_control_by_criteria(report_window, "Pane", automation_id=AUTO_ID_INQUIRY_START_DATE)
         if not start_date_input:
             raise Exception("조회기간 시작일 입력 필드를 찾을 수 없습니다.")
@@ -88,7 +126,7 @@ def save_data_daily_return(selected_user, account_index, inquiry_start_date=None
         raise Exception("조회 버튼을 찾을 수 없습니다.")
     inquiry_btn.click_input()
     logging.info("'조회' 버튼을 클릭하였습니다.")
-    time.sleep(4)  # 조회 결과 로딩 대기
+    time.sleep(6)  # 조회 결과 로딩 대기
 
     # 조회 결과가 한 번에 다 안 나오면(오랫동안 미실행 후 첫 실행 등) '다음' 버튼이 활성화됨.
     # 비활성화될 때까지 계속 눌러서 더 오래된 데이터를 이어붙인다 (최대 2년치까지 조회 가능).
@@ -100,7 +138,7 @@ def save_data_daily_return(selected_user, account_index, inquiry_start_date=None
             break
         next_btn.click_input()
         logging.info(f"'다음' 버튼 클릭 ({i + 1}번째) — 추가 데이터 로딩 중...")
-        time.sleep(2)
+        time.sleep(3)
     else:
         logging.warning(f"'다음' 버튼을 {MAX_NEXT_CLICKS}회 눌렀는데도 비활성화되지 않음. 데이터가 잘렸을 수 있습니다.")
 
