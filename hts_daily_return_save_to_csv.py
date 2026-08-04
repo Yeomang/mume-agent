@@ -105,9 +105,17 @@ def save_data_daily_return(selected_user, account_index, inquiry_start_date=None
     logging.info(f"{selected_user}님의 {account_index}번째 계좌번호를 선택하였습니다.")
     time.sleep(3)
 
-    # 조회기간 입력 — 지정하지 않으면 화면 기본값(최근 1개월)을 그대로 사용.
+    # 조회기간 입력 — 둘 다 지정하지 않으면 화면 기본값(최근 1개월)을 그대로 사용.
     # 매일 실행하는 정상 케이스는 겹치는 날짜를 콘솔에서 upsert로 덮어쓰므로 날짜 범위를 조작할 필요 없음.
-    # 과거 데이터를 직접 보충하고 싶을 때(콘솔 수동 실행)만 inquiry_start_date/inquiry_end_date를 지정.
+    # 과거 데이터를 직접 보충하고 싶을 때(콘솔 수동 실행)만 지정. 하나만 지정된 경우
+    # 나머지 한쪽을 채워서라도 "지정한 쪽은 반드시 반영"한다 — 둘 다 있어야만 반영되는
+    # 기존 방식은 시작일만 입력하고 종료일을 비워두면 아무것도 반영 안 되고 화면 기본값으로
+    # 조용히 빠지는 문제가 있었음.
+    if inquiry_start_date and not inquiry_end_date:
+        inquiry_end_date = dt.date.today().strftime("%Y%m%d")
+    elif inquiry_end_date and not inquiry_start_date:
+        inquiry_start_date = (dt.date.today() - dt.timedelta(days=MAX_LOOKBACK_DAYS)).strftime("%Y%m%d")
+
     if inquiry_start_date and inquiry_end_date:
         inquiry_start_date, inquiry_end_date = _clamp_inquiry_range(inquiry_start_date, inquiry_end_date)
         start_date_input = find_control_by_criteria(report_window, "Pane", automation_id=AUTO_ID_INQUIRY_START_DATE)
