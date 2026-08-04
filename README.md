@@ -4,7 +4,7 @@
 
 웹 콘솔([mume-console](../mume-console))에서 HTTP API로 제어하며, 스케줄 또는 수동으로 작업을 실행한다.
 
-> **최종 업데이트:** 2026-08-03
+> **최종 업데이트:** 2026-08-04
 
 ---
 
@@ -12,6 +12,7 @@
 
 | 날짜 | 내용 |
 |------|------|
+| 2026-08-04 | `_apply_price_guard()`가 가격을 보정했을 때 보정된 주문(`sell_orders`/`buy_orders`)에 `note`(예: "가격보정: 계산가 $96.54 → $97.51 (...)")를 태깅(`hts_orders_from_supabase.py`). `order_status` 기록은 이 dict가 아니라 HTS 실제 주문내역 CSV 기반으로 별도 구성되기 때문에, (side, 보정된 가격)으로 매칭해 CSV 기반 기록에도 note를 붙이도록 함. mume-console `/api/order-status`가 이 note를 저장하고, 사이클 상세 차트 툴팁에 "이 날 가격보정 있었음"으로 표시(`order_status.note` 컬럼 추가 — `043_add_order_status_note.sql`) |
 | 2026-08-03 | 텔레그램 진행률 표시에 V3.0/V4.0 쿼터매도기간("(쿼터매도기간)") 추가 — mume-console `calc_engine.py`가 새로 노출한 `computed.in_quarter` 필드 사용(`hts_orders_from_supabase.py`, `order_execution_update_supabase.py`). V2.2 쿼터손절모드와 같은 표시 방식. 겸사겸사 `order_execution_update_supabase.py`(체결 내역 메시지)엔 V2.2 쿼터손절모드 표시 자체가 원래 없었던 사각지대도 같이 채움 |
 | 2026-08-03 | 텔레그램 주문/체결 메시지의 종목 표시를 "SOXL (V4.0)"처럼 방법론 버전만 보여주던 것에서, V4.0 리버스모드일 땐 "SOXL (V4.0 리버스모드)"로 구분 표시하도록 수정(`hts_orders_from_supabase.py`, `order_execution_update_supabase.py`). 리버스모드는 일반모드와 매매 로직이 크게 달라서(매도가 정상적으로 나가는 구조) 표시 없이는 리버스모드 진입 사실을 메시지만 보고 알 수 없었음 |
 | 2026-08-03 | `_apply_reverse_price_guard()`를 `_apply_price_guard()`로 일반화하고 버그 2건 수정(`hts_orders_from_supabase.py`). ① 매도가가 클램프될 때 짝지어진 리버스모드 매수가(별지점−0.01)를 독립적으로 같은 경계값에 클램프해버려 매도/매수가 동일 가격이 되며 설계된 1센트 스프레드가 사라지던 버그 — 매도만 클램프하고 매수는 "보정된 매도가−0.01"로 파생하도록 수정. ② 실시간가 소스로 쓰던 `_get_aftermarket_price()`(yfinance fast_info)가 장 시작 전 등 시세 갱신 전 구간에서 직전 종가를 반환하던 문제 — 이미 로드된 HTS 잔고 CSV의 실제 브로커 현재가를 우선 쓰는 `_get_live_price()`로 교체(`_convert_orders_for_aftermarket()`도 동일 적용). ③ 가드 적용 범위를 리버스모드 전용에서 "LOC로 나가는 모든 매도 주문"(일반모드 별%LOC매도가, 쿼터손절모드 -10%LOC매도가 포함)으로 확장 — 매수 쪽은 이미 큰수매수가(dip_buy_price)가 실시간가 기반 안전장치 역할을 하므로 이 확장 대상에서 제외 |

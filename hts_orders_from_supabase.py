@@ -147,18 +147,20 @@ def _apply_price_guard(sell_orders, buy_orders, ticker, guard_rate, is_reverse_m
             new_sell_orders.append(o)
             continue  # MOC 라벨 등 숫자가 아닌 가격은 그대로 둠
         if price_num < lower:
-            corrections.append(
-                f"▶ 매도 ${price_num:,.2f} → ${lower:,.2f} "
+            note = (
+                f"가격보정: 계산가 ${price_num:,.2f} → ${lower:,.2f} "
                 f"(실시간가 ${live_price:,.2f} 대비 -{guard_rate:.0f}% 하한)"
             )
-            new_sell_orders.append({**o, "price": lower})
+            corrections.append("▶ 매도 " + note[len("가격보정: "):])
+            new_sell_orders.append({**o, "price": lower, "note": note})
             corrected_sell_price = lower
         elif price_num > upper:
-            corrections.append(
-                f"▶ 매도 ${price_num:,.2f} → ${upper:,.2f} "
+            note = (
+                f"가격보정: 계산가 ${price_num:,.2f} → ${upper:,.2f} "
                 f"(실시간가 ${live_price:,.2f} 대비 +{guard_rate:.0f}% 상한)"
             )
-            new_sell_orders.append({**o, "price": upper})
+            corrections.append("▶ 매도 " + note[len("가격보정: "):])
+            new_sell_orders.append({**o, "price": upper, "note": note})
             corrected_sell_price = upper
         else:
             new_sell_orders.append(o)
@@ -174,11 +176,12 @@ def _apply_price_guard(sell_orders, buy_orders, ticker, guard_rate, is_reverse_m
             except (TypeError, ValueError):
                 new_buy_orders.append(o)
                 continue  # 리버스모드에서 비활성인 평단LOC/큰수매수(빈 값)는 그대로 둠
-            corrections.append(
-                f"▶ 매수 ${price_num:,.2f} → ${derived_buy_price:,.2f} "
+            note = (
+                f"가격보정: 계산가 ${price_num:,.2f} → ${derived_buy_price:,.2f} "
                 f"(보정된 매도가 − $0.01, 별지점 스프레드 유지)"
             )
-            new_buy_orders.append({**o, "price": derived_buy_price})
+            corrections.append("▶ 매수 " + note[len("가격보정: "):])
+            new_buy_orders.append({**o, "price": derived_buy_price, "note": note})
     else:
         # 일반모드/쿼터손절모드: 매수는 건드리지 않는다 (큰수매수가 이미 보호).
         new_buy_orders = buy_orders
@@ -851,6 +854,24 @@ def hts_orders_from_supabase(
                             f"▶ (가격이 실시간가 대비 과도하게 벗어났을 가능성 등)"
                         )
 
+                # 가격보정(가드) 메모 룩업: (side, 보정된 가격) -> note
+                # CSV 기반 order_status 기록은 sell_orders/buy_orders와 별개 소스(HTS
+                # 실제 주문내역)라서 note가 자동으로 안 딸려온다. 실제 전송가로 매칭해서
+                # CSV 행에 note를 붙인다.
+                _price_correction_notes = {}
+                for _o in sell_orders:
+                    if _o.get("note"):
+                        try:
+                            _price_correction_notes[("sell", round(float(_o["price"]), 2))] = _o["note"]
+                        except (TypeError, ValueError):
+                            pass
+                for _o in buy_orders:
+                    if _o.get("note"):
+                        try:
+                            _price_correction_notes[("buy", round(float(_o["price"]), 2))] = _o["note"]
+                        except (TypeError, ValueError):
+                            pass
+
                 # [개선] order_status를 HTS 실제 주문내역 CSV 기반으로 기록
                 # 기존: 매도/매수 함수 직후 기록 → HTS에서 실제 접수 안 됐어도 "ordered" 기록
                 # 개선: CSV 저장 후 실제 들어간 건만 기록 → 정확한 상태 반영
@@ -864,12 +885,17 @@ def hts_orders_from_supabase(
                         _order_type = "loc_sell" if _side == "sell" else "loc_buy"
                     else:
                         _order_type = _otype
-                    _csv_orders_for_status.append({
+                    _row_price = float(str(row["주문가"]).replace(",", ""))
+                    _status_entry = {
                         "order_type": _order_type,
                         "side": _side,
                         "qty": int(float(str(row["주문량"]).replace(",", ""))),
-                        "price": float(str(row["주문가"]).replace(",", "")),
-                    })
+                        "price": _row_price,
+                    }
+                    _note = _price_correction_notes.get((_side, round(_row_price, 2)))
+                    if _note:
+                        _status_entry["note"] = _note
+                    _csv_orders_for_status.append(_status_entry)
                 if _csv_orders_for_status:
                     _record_order_status(cycle_id, _csv_orders_for_status)
         else:
