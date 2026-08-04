@@ -11,6 +11,8 @@ import os
 AUTO_ID_SCREEN_SEARCH_INPUT = "1000"  # 화면검색 번호 입력 필드 automation_id
 SCREEN_NUM_DAILY_RETURN = "2363"  # 일별 계좌수익률 화면번호
 AUTO_ID_DROPDOWN_ACCOUNT = "3785"  # 계좌번호 드롭다운 필드 automation_id (6104와 동일)
+AUTO_ID_INQUIRY_START_DATE = "3835"  # 조회기간 시작일 입력 필드 automation_id (MaskEdit)
+AUTO_ID_INQUIRY_END_DATE = "3840"  # 조회기간 종료일 입력 필드 automation_id (MaskEdit)
 AUTO_ID_INQUIRY_BUTTON = "3810"  # 조회 버튼 automation_id (6104의 3815와 다름! 3815는 '다음' 버튼)
 AUTO_ID_NEXT_BUTTON = "3815"  # '다음' 버튼 automation_id — 조회 결과가 화면 최대치를 넘으면 눌러야 추가 데이터가 이어붙여짐
 AUTO_ID_TABLE_DAILY_RETURN = "3825"  # 일별 계좌수익률 데이터 테이블 automation_id
@@ -18,7 +20,7 @@ MAX_NEXT_CLICKS = 60  # '다음' 버튼 무한루프 방지용 안전 상한. �
 
 
 @with_desktop_retry
-def save_data_daily_return(selected_user, account_index):
+def save_data_daily_return(selected_user, account_index, inquiry_start_date=None, inquiry_end_date=None):
     logging.info(">>>>> HTS 일별 계좌수익률 데이터 csv파일로 저장하기 시작! <<<<<")
 
     # 마우스 및 키보드 잠금 시작
@@ -66,8 +68,21 @@ def save_data_daily_return(selected_user, account_index):
     logging.info(f"{selected_user}님의 {account_index}번째 계좌번호를 선택하였습니다.")
     time.sleep(3)
 
-    # '조회' 버튼 클릭 — 기간은 화면을 새로 열 때 기본값(최근 1개월)을 그대로 사용.
-    # 매일 실행해도 겹치는 날짜는 콘솔에서 upsert로 덮어쓰므로 날짜 범위를 조작할 필요 없음.
+    # 조회기간 입력 — 지정하지 않으면 화면 기본값(최근 1개월)을 그대로 사용.
+    # 매일 실행하는 정상 케이스는 겹치는 날짜를 콘솔에서 upsert로 덮어쓰므로 날짜 범위를 조작할 필요 없음.
+    # 과거 데이터를 직접 보충하고 싶을 때(콘솔 수동 실행)만 inquiry_start_date/inquiry_end_date를 지정.
+    if inquiry_start_date and inquiry_end_date:
+        start_date_input = find_control_by_criteria(report_window, "Pane", automation_id=AUTO_ID_INQUIRY_START_DATE)
+        if not start_date_input:
+            raise Exception("조회기간 시작일 입력 필드를 찾을 수 없습니다.")
+        set_focus_and_type(start_date_input, inquiry_start_date)
+        end_date_input = find_control_by_criteria(report_window, "Pane", automation_id=AUTO_ID_INQUIRY_END_DATE)
+        if not end_date_input:
+            raise Exception("조회기간 종료일 입력 필드를 찾을 수 없습니다.")
+        set_focus_and_type(end_date_input, inquiry_end_date)
+        logging.info(f"조회기간 입력 : {inquiry_start_date}-{inquiry_end_date}")
+
+    # '조회' 버튼 클릭
     inquiry_btn = find_control_by_criteria(main_window, "Button", automation_id=AUTO_ID_INQUIRY_BUTTON)
     if not inquiry_btn:
         raise Exception("조회 버튼을 찾을 수 없습니다.")
@@ -111,11 +126,15 @@ def save_data_daily_return(selected_user, account_index):
 if __name__ == "__main__":
     # ------------------------------------------------------------
     # 로컬 테스트용 실행 블록
+    # - 조회 기간을 직접 지정하려면 INQUIRY_START_DATE / INQUIRY_END_DATE 에
+    #   yyyymmdd 문자열 입력 (예: "20250318"). None이면 화면 기본값(최근 1개월).
     # ------------------------------------------------------------
     TEST_USER: str | None = "홍승표"
     TEST_ACCOUNT: int | None = 3
+    INQUIRY_START_DATE: str | None = None
+    INQUIRY_END_DATE: str | None = None
 
     from automation_target_store import resolve_first_user_account
 
     selected_user, account_index = resolve_first_user_account(TEST_USER, TEST_ACCOUNT)
-    save_data_daily_return(selected_user, account_index)
+    save_data_daily_return(selected_user, account_index, INQUIRY_START_DATE, INQUIRY_END_DATE)

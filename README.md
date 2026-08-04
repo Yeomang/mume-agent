@@ -12,6 +12,7 @@
 
 | 날짜 | 내용 |
 |------|------|
+| 2026-08-04 | 일별 계좌수익률([2363] 화면) 조회기간 시작일/종료일 지정 기능 추가(`hts_daily_return_save_to_csv.py` — automation_id 3835/3840) + 콘솔에서 수동으로 재조회할 수 있는 `refresh_daily_return` 잡 추가(`main_refresh_daily_return.py`, `hts_agent.py`, mume-console `automation.js`/`index.html`). 이전엔 화면 기본값(최근 1개월)만 조회 가능해 과거 기간을 보충하려면 '다음' 버튼이 스스로 활성화될 때까지 기다리는 수밖에 없었음 |
 | 2026-08-04 | `_apply_price_guard()`가 가격을 보정했을 때 보정된 주문(`sell_orders`/`buy_orders`)에 `note`(예: "가격보정: 계산가 $96.54 → $97.51 (...)")를 태깅(`hts_orders_from_supabase.py`). `order_status` 기록은 이 dict가 아니라 HTS 실제 주문내역 CSV 기반으로 별도 구성되기 때문에, (side, 보정된 가격)으로 매칭해 CSV 기반 기록에도 note를 붙이도록 함. mume-console `/api/order-status`가 이 note를 저장하고, 사이클 상세 차트 툴팁에 "이 날 가격보정 있었음"으로 표시(`order_status.note` 컬럼 추가 — `043_add_order_status_note.sql`) |
 | 2026-08-03 | 텔레그램 진행률 표시에 V3.0/V4.0 쿼터매도기간("(쿼터매도기간)") 추가 — mume-console `calc_engine.py`가 새로 노출한 `computed.in_quarter` 필드 사용(`hts_orders_from_supabase.py`, `order_execution_update_supabase.py`). V2.2 쿼터손절모드와 같은 표시 방식. 겸사겸사 `order_execution_update_supabase.py`(체결 내역 메시지)엔 V2.2 쿼터손절모드 표시 자체가 원래 없었던 사각지대도 같이 채움 |
 | 2026-08-03 | 텔레그램 주문/체결 메시지의 종목 표시를 "SOXL (V4.0)"처럼 방법론 버전만 보여주던 것에서, V4.0 리버스모드일 땐 "SOXL (V4.0 리버스모드)"로 구분 표시하도록 수정(`hts_orders_from_supabase.py`, `order_execution_update_supabase.py`). 리버스모드는 일반모드와 매매 로직이 크게 달라서(매도가 정상적으로 나가는 구조) 표시 없이는 리버스모드 진입 사실을 메시지만 보고 알 수 없었음 |
@@ -112,6 +113,7 @@ mume-agent/
 ├── main_aftermarket.py           # 시간외 작업 진입점 (추가 매수)
 ├── main_cancel_orders.py         # 미체결 주문 일괄 취소 진입점
 ├── main_refresh_balance.py       # 잔고 수동 갱신
+├── main_refresh_daily_return.py  # 일별 계좌수익률 수동 재조회 (기간 지정 가능)
 │
 ├── hts_login.py                  # HTS 실행 + 공동인증서 로그인
 ├── hts_order_buy.py              # 해외주식 매수 주문 ([6100] 화면)
@@ -122,11 +124,13 @@ mume-agent/
 ├── hts_orders_execution_save_to_csv.py  # 체결내역 CSV 저장 ([6114] 화면)
 ├── hts_orders_history_save_to_csv.py    # 주문내역 CSV 저장 ([6100] 주문체결 탭)
 ├── hts_stock_balance_save_to_csv.py     # 보유잔고 CSV 저장 ([6104] 화면)
+├── hts_daily_return_save_to_csv.py      # 일별 계좌수익률 CSV 저장 ([2363] 화면)
 │
 ├── order_execution_data_preprocessing.py # 체결내역 CSV 전처리 (이중 헤더 처리)
 ├── order_history_data_preprocessing.py   # 주문내역 CSV 전처리
 ├── stock_balance_data_preprocessing.py   # 잔고 CSV 전처리
 ├── order_execution_update_supabase.py    # 전처리된 체결 데이터 → Supabase 동기화
+├── daily_return_update_supabase.py       # 일별 계좌수익률 CSV → Supabase 동기화 + 콘솔 재계산 트리거
 │
 ├── config.py                     # 환경 변수 로드 + DB 설정 병합
 ├── secrets_manager.py            # Windows Credential Manager 래퍼 (비밀번호 관리)
@@ -153,7 +157,8 @@ mume-agent/
 │   ├── order_history_processed/      # 전처리된 주문내역
 │   ├── stock_balance_raw/            # HTS 잔고 원본 CSV
 │   ├── stock_balance_processed/      # 전처리된 잔고
-│   └── foreign_deposit_raw/          # 외화예수금 원본 CSV
+│   ├── foreign_deposit_raw/          # 외화예수금 원본 CSV
+│   └── daily_return_raw/             # HTS 일별 계좌수익률 원본 CSV
 │
 └── pids/                         # 작업별 PID 파일 (running job 추적)
 ```
@@ -188,10 +193,10 @@ mume-agent/
 
 ```
 환경 변수 전달 목록:
-  JOB_NAME          — 작업 타입 (morning/evening/aftermarket/cancel_orders)
+  JOB_NAME          — 작업 타입 (morning/evening/aftermarket/cancel_orders/refresh_balance/refresh_daily_return)
   JOB_USER_ACCOUNTS — 사용자별 계좌/사이클 JSON
   JOB_TEST_MODE     — "1" 이면 테스트 모드 (실주문 없음)
-  JOB_DATE_FROM     — 조회 시작일 (morning/aftermarket)
+  JOB_DATE_FROM     — 조회 시작일 (morning/aftermarket/refresh_daily_return, 미지정 시 작업별 기본값)
   JOB_DATE_TO       — 조회 종료일
 ```
 
@@ -228,6 +233,7 @@ def main():
 | `main_aftermarket.py` | 시간외 거래 시간 | 추가 매수 주문 실행 |
 | `main_cancel_orders.py` | 수동 또는 긴급 | 미체결 주문 일괄 취소 |
 | `main_refresh_balance.py` | 수동 | 잔고만 수동 갱신 |
+| `main_refresh_daily_return.py` | 수동 | 일별 계좌수익률만 수동 재조회 (기간 지정 가능) |
 
 ---
 
@@ -287,6 +293,24 @@ HTS의 [6100] 해외주식 주문 화면을 GUI로 제어한다.
 
 [6104] 해외주식 보유잔고 화면에서 계좌별 잔고를 CSV로 내보내기
 
+#### hts_daily_return_save_to_csv.py — 일별 계좌수익률 CSV 저장
+
+[2363] 일별 계좌수익률 화면(탭 5개짜리 리포트 창)에서 계좌별 일별 수익률을 CSV로 내보내기.
+
+```
+실행 흐름:
+  1. 화면번호 "2363" 입력 → 리포트 창 열기 → '일별 계좌수익률' 탭 클릭
+  2. 계좌 선택
+  3. inquiry_start_date/inquiry_end_date를 지정한 경우에만 조회기간
+     시작일(automation_id 3835)/종료일(3840) 입력 — 미지정 시 화면 기본값(최근 1개월) 사용
+  4. '조회' 버튼(3810) 클릭
+  5. 조회 결과가 화면 최대치를 넘어 '다음' 버튼(3815)이 활성화되면
+     비활성화될 때까지 반복 클릭 — 최근 2년 이내까지 누적 로딩 (MAX_NEXT_CLICKS=60)
+  6. 데이터 테이블(3825) 우클릭 → 파일로 보내기 → CSV 저장
+```
+
+매일 실행하는 정상 케이스는 날짜 미지정으로 호출해 화면 기본값(최근 1개월)만 조회하고, 겹치는 날짜는 콘솔 upsert가 덮어쓴다. 과거 기간을 직접 보충하고 싶을 때(콘솔 `refresh_daily_return` 수동 실행)만 조회기간을 지정한다.
+
 ---
 
 ### 데이터 파이프라인 모듈
@@ -321,6 +345,10 @@ HTS가 내보내는 CSV는 이중 헤더 구조를 가진다. 이를 pandas로 �
 #### order_execution_update_supabase.py — Supabase 동기화
 
 전처리된 체결 데이터를 `cycle_trades` 테이블에 INSERT하고, 콘솔 API의 `/recompute/{cycle_id}`를 호출하여 계산 결과를 갱신한다. 실패 시 1회 재시도한다.
+
+#### daily_return_update_supabase.py — 일별 계좌수익률 Supabase 동기화
+
+일별 계좌수익률 CSV를 파싱해 `account_daily_return`에 upsert한다. 입출금 분류(`cashflow_status`)는 건드리지 않고 DB 기본값 `pending`으로 남기며, 미분류 입출금이 있으면 텔레그램(EXECUTION 봇)으로 알림한다. upsert 후 콘솔의 재계산 트리거 API를 호출해 `asset_daily_snapshots`(broker_reported)까지 갱신한다. 계좌에 기록이 전혀 없던 상태에서 처음 동기화되면, iMeritz가 최근 2년치까지만 조회 가능하다는 제약을 텔레그램으로 안내한다(그 이전 기록은 콘솔 CSV 업로드로 보충).
 
 ---
 
@@ -505,6 +533,7 @@ def hts_order_buy(...):
 | `6100` | 해외주식 주문 (매수/매도/미체결/주문체결 탭) |
 | `6104` | 해외주식 보유잔고 |
 | `6114` | 해외주식 주문체결내역 (날짜 범위 조회) |
+| `2363` | 일별 계좌수익률 (탭 5개짜리 리포트 창, 날짜 범위 조회) |
 
 ---
 
@@ -530,6 +559,10 @@ HTS 화면 → CSV 내보내기 → pandas 전처리 → Supabase 업데이트
 외화예수금 화면
   → data/foreign_deposit_raw/foreign_deposit_raw_{user}_{account}.csv
   → account_cash_balance upsert
+
+[2363] 일별 계좌수익률
+  → data/daily_return_raw/daily_return_raw_{user}_{account}.csv
+  → account_daily_return upsert + 콘솔 asset_daily_snapshots 재계산 트리거
 ```
 
 **Supabase 주요 테이블:**
@@ -542,6 +575,7 @@ HTS 화면 → CSV 내보내기 → pandas 전처리 → Supabase 업데이트
 | `user_accounts` | 사용자 증권 계좌 + 자동화 대상 여부 |
 | `account_stock_balance` | 계좌별 보유잔고 |
 | `account_cash_balance` | 계좌별 외화예수금 |
+| `account_daily_return` | 계좌별 일별 수익률 (자산 대시보드 차트 소스) |
 | `agent_settings` | 에이전트 설정 (텔레그램 토큰, HTS 경로 등) |
 | `order_status` | 당일 주문 상태 (취소 시 삭제됨) |
 
