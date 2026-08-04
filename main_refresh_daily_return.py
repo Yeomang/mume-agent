@@ -6,26 +6,15 @@
 지정하면 해당 기간만 조회하고, 지정하지 않으면 화면 기본값(최근 1개월)을 사용한다.
 """
 
-import os
-import json
 import logging
-import traceback
 import sys
+import traceback
 from pathlib import Path
 
-from utils import set_log_context, install_log_context_filter, kill_window_by_title, to_yyyymmdd
-from hts_login import hts_login
-from hts_daily_return_save_to_csv import save_data_daily_return
-from daily_return_update_supabase import sync_daily_return_to_db
-from job_control import register_job_pid, unregister_job_pid
-from automation_target_store import load_automation_target
-from config import Config
-
+# ─────────────────────────────
+# 로깅 최우선 설정 — import 실패도 반드시 기록
+# ─────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
-
-# ─────────────────────────────
-# 로깅 설정 + 전역 예외 훅
-# ─────────────────────────────
 LOG_FILE = BASE_DIR / "log.log"
 
 logging.basicConfig(
@@ -35,7 +24,6 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     encoding="utf-8",
 )
-install_log_context_filter()
 
 
 def log_uncaught_exceptions(exctype, value, tb):
@@ -44,6 +32,18 @@ def log_uncaught_exceptions(exctype, value, tb):
 
 
 sys.excepthook = log_uncaught_exceptions
+
+import os
+import json
+
+from utils import set_log_context, install_log_context_filter, kill_window_by_title, to_yyyymmdd
+install_log_context_filter()
+from hts_login import hts_login
+from hts_daily_return_save_to_csv import save_data_daily_return
+from daily_return_update_supabase import sync_daily_return_to_db
+from job_control import register_job_pid, unregister_job_pid
+from automation_target_store import load_automation_target
+from config import Config
 
 
 def run_refresh_daily_return():
