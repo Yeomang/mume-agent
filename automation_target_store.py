@@ -3,8 +3,9 @@
 """
 자동 실행 대상을 Supabase user_accounts 테이블에서 조회하는 유틸리티.
 
-user_accounts.is_automation_target = true 인 계좌를 조회하여
-아래처럼 변환된 형태로 반환한다.
+user_accounts.is_automation_target = true 이고 broker = '메리츠'인 계좌를 조회하여
+아래처럼 변환된 형태로 반환한다. (이 에이전트는 메리츠 전용이므로 broker로 걸러내지
+않으면 동일 user_name·account_index를 쓰는 타 증권사 계좌와 충돌할 수 있다.)
 
     {
       "최용준": [
@@ -67,6 +68,7 @@ def _load_from_supabase() -> Dict[str, List[int]] | None:
             sb.table("user_accounts")
             .select("id,auth_user_id,user_name,account_index")
             .eq("is_automation_target", True)
+            .eq("broker", "메리츠")
         )
         if owner_uid:
             query = query.eq("auth_user_id", owner_uid)
