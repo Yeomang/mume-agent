@@ -4,7 +4,7 @@
 
 웹 콘솔([mume-console](../mume-console))에서 HTTP API로 제어하며, 스케줄 또는 수동으로 작업을 실행한다.
 
-> **최종 업데이트:** 2026-08-04
+> **최종 업데이트:** 2026-08-22
 
 ---
 
@@ -12,6 +12,7 @@
 
 | 날짜 | 내용 |
 |------|------|
+| 2026-08-22 | LOC 매도가 실시간가 기준 자동 보정(`_apply_price_guard()`, 8/1~8/4 도입)을 제거 — LOC 매도가는 다시 계산가 그대로 주문한다. 재검토 결과 매도 주문가 자체를 바꾸는 건 원치 않는 방향으로 결론(`hts_orders_from_supabase.py`). 대신 브로커가 거부한 매도 주문을 애프터마켓 job이 감지해 원래 가격 그대로 지정가로 재주문하도록 신규 추가 — 거부 후 장중 상승으로 원래 체결됐어야 하는 케이스를 놓치지 않기 위함(현재가 사전 체크 없이 지정가로 넣어 시장에 맡김)(`hts_orders_aftermarket.py`) |
 | 2026-08-04 | 일별 계좌수익률([2363] 화면) 조회기간 시작일/종료일 지정 기능 추가(`hts_daily_return_save_to_csv.py` — automation_id 3835/3840) + 콘솔에서 수동으로 재조회할 수 있는 `refresh_daily_return` 잡 추가(`main_refresh_daily_return.py`, `hts_agent.py`, mume-console `automation.js`/`index.html`). 이전엔 화면 기본값(최근 1개월)만 조회 가능해 과거 기간을 보충하려면 '다음' 버튼이 스스로 활성화될 때까지 기다리는 수밖에 없었음 |
 | 2026-08-04 | `_apply_price_guard()`가 가격을 보정했을 때 보정된 주문(`sell_orders`/`buy_orders`)에 `note`(예: "가격보정: 계산가 $96.54 → $97.51 (...)")를 태깅(`hts_orders_from_supabase.py`). `order_status` 기록은 이 dict가 아니라 HTS 실제 주문내역 CSV 기반으로 별도 구성되기 때문에, (side, 보정된 가격)으로 매칭해 CSV 기반 기록에도 note를 붙이도록 함. mume-console `/api/order-status`가 이 note를 저장하고, 사이클 상세 차트 툴팁에 "이 날 가격보정 있었음"으로 표시(`order_status.note` 컬럼 추가 — `043_add_order_status_note.sql`) |
 | 2026-08-03 | 텔레그램 진행률 표시에 V3.0/V4.0 쿼터매도기간("(쿼터매도기간)") 추가 — mume-console `calc_engine.py`가 새로 노출한 `computed.in_quarter` 필드 사용(`hts_orders_from_supabase.py`, `order_execution_update_supabase.py`). V2.2 쿼터손절모드와 같은 표시 방식. 겸사겸사 `order_execution_update_supabase.py`(체결 내역 메시지)엔 V2.2 쿼터손절모드 표시 자체가 원래 없었던 사각지대도 같이 채움 |

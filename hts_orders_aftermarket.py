@@ -8,6 +8,7 @@ from utils import (
     load_csv_if_exists,
 )
 from hts_order_buy import hts_order_buy
+from hts_order_sell import hts_order_sell
 from hts_orders_from_supabase import _record_order_status, _is_computed_fresh
 from config import Config
 from supabase_client import get_supabase_client, supabase_fetch_all
@@ -166,6 +167,7 @@ def hts_orders_aftermarket(
         # 미체결(체결수량=0, 주문은 살아있음)과 거부(주문 자체가 브로커에 안 들어감)는
         # 다른 상황인데 기존엔 '주문상태' 컬럼을 안 봐서 거부돼도 조용히 넘어갔음
         # (2026-07-31 사이클 #294 매도 거부가 다음날 아침까지 발견 안 된 사례).
+        rejected_df = pd.DataFrame()
         if '주문상태' in filtered_df.columns:
             rejected_df = filtered_df[filtered_df['주문상태'] == '거부']
             if not rejected_df.empty:
@@ -180,6 +182,51 @@ def hts_orders_aftermarket(
                     f"▶ 브로커가 거부한 주문입니다 — HTS에서 사유 확인 필요\n"
                     f"▶ (가격이 실시간가 대비 과도하게 벗어났을 가능성 등)"
                 )
+
+        # [개선] 거부된 매도 주문 애프터마켓 재주문
+        # LOC 매도가는 실시간가 기준으로 자동 보정하지 않기로 했기 때문에(계산가
+        # 그대로 정규장에 주문), 시세 급변 시 브로커가 거부할 수 있다. 거부됐는데
+        # 장중 주가가 올라 원래 체결됐어야 하는 경우를 놓치지 않도록, 거부된 매도
+        # 주문을 원래 가격 그대로 지정가로 애프터마켓에 재주문한다 (현재가 사전
+        # 체크 없음 — 지정가로 넣어 시장에 맡긴다).
+        sell_rejected_df = rejected_df[rejected_df['주문구분'] == '매도'] if not rejected_df.empty else rejected_df
+        if not sell_rejected_df.empty:
+            resubmit_sell_orders = [
+                {"quantity": int(row['주문수량']), "price": float(row['주문단가']), "order_type_index": 0}
+                for _, row in sell_rejected_df.iterrows()
+            ]
+            order_sell_success, order_sell_error = hts_order_sell(
+                selected_user, account_index, ticker, resubmit_sell_orders, is_test_mode
+            )
+            if order_sell_success and not is_test_mode:
+                _record_order_status(cycle_id, [
+                    {"order_type": "aftermarket_sell", "side": "sell",
+                     "qty": o["quantity"], "price": o["price"]}
+                    for o in resubmit_sell_orders
+                ])
+            formatted_resubmit = "\n".join([
+                f"   •  ${o['price']:,.2f}  |  {o['quantity']}주  |  보통(지정가)"
+                for o in resubmit_sell_orders
+            ])
+            if order_sell_success:
+                message = (
+                    f"🔁 *[무매사이클 #{cycle_seq}] 거부된 매도 애프터마켓 재주문 완료*\n\n"
+                    f"▶ 계좌: {selected_user} | 메리츠 | {account_index}번째 계좌\n"
+                    f"▶ 종목: {ticker} ({method_ver})\n"
+                    f"▶ 재주문내역 (거부됐던 원래 가격 그대로)\n"
+                    f"*{formatted_resubmit}*"
+                )
+                if order_sell_error:
+                    message += f"\n▶ ⚠️ 일부 실패: {order_sell_error}"
+            else:
+                message = (
+                    f"📉 *[무매사이클 #{cycle_seq}] 거부된 매도 애프터마켓 재주문 실패❌*\n\n"
+                    f"▶ 계좌: {selected_user} | 메리츠 | {account_index}번째 계좌\n"
+                    f"▶ 종목: {ticker} ({method_ver})\n"
+                    f"▶ 에러내역\n"
+                    f"*{order_sell_error}*"
+                )
+            send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, message)
 
         # 체결 건수 확인 (매도+매수 전체)
         total_executed_qty = filtered_df['체결수량'].abs().sum()
