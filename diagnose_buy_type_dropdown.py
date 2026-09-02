@@ -4,16 +4,19 @@
 HTS가 이미 로그인되어 열려 있는 상태에서 실행한다. hts_order_buy.py와 동일하게
 계좌 선택 + 비밀번호 안내창 처리까지 그대로 따라가서 실제 매수 흐름과 화면
 상태를 최대한 똑같이 재현한 뒤, automation_id="3865"인 Pane을 전부 나열하고
-이름이 있는(=현재 선택값이 표시된) 컨트롤을 골라 클릭해 드롭다운을 연다.
-열린 뒤 나타나는 항목 목록(ListItem)을 순서대로 출력해 LOC가 몇 번째인지
-직접 확인한다. 수량/가격 입력이나 매수 버튼 클릭은 하지 않고 주문창을 닫고
-종료한다.
+이름이 있는(=현재 선택값이 표시된) 컨트롤을 실제 유형 드롭다운으로 판단한다.
+
+이후 실제 코드와 동일한 {PGUP}{DOWN N}{ENTER} 시퀀스를 N=0..9까지 하나씩
+실행하면서, 그 결과 드롭다운 컨트롤에 표시되는 값(name)을 그대로 읽어
+"N번 -> 실제 선택된 값"을 로그로 남긴다. LOC가 정확히 몇 번인지 이 로그로
+바로 확인 가능하다. 수량/가격 입력이나 매수 버튼 클릭은 절대 하지 않고
+주문창을 닫고 종료한다.
 
 실행: (.venv 활성화 후) python diagnose_buy_type_dropdown.py
 """
 from utils import setup_window, find_control_by_criteria, set_focus_and_type, _handle_password_dialog
 from secrets_manager import get_account_password
-from pywinauto import Application, Desktop
+from pywinauto import Application
 from pywinauto.keyboard import send_keys
 import win32gui
 import logging
@@ -31,24 +34,6 @@ TEST_TICKER = "TQQQ"
 
 TEST_USER = None
 TEST_ACCOUNT = None
-
-
-def _dump(ctrl, depth=0, max_depth=3):
-    """컨트롤 서브트리를 재귀적으로 로그 출력 (print_control_identifiers 대체)."""
-    if depth > max_depth:
-        return
-    try:
-        info = ctrl.element_info
-        rect = ctrl.rectangle()
-        logging.info(f"{'  ' * depth}- type={info.control_type} name='{info.name}' automation_id='{info.automation_id}' rect={rect}")
-    except Exception as e:
-        logging.info(f"{'  ' * depth}- (읽기 실패: {e})")
-        return
-    try:
-        for child in ctrl.children():
-            _dump(child, depth + 1, max_depth)
-    except Exception:
-        pass
 
 
 def main():
@@ -120,28 +105,30 @@ def main():
     target_idx, target = named[0]
     logging.info(f"실제 유형 드롭다운으로 판단되는 컨트롤: index={target_idx} name='{target.element_info.name}'")
 
-    # 2) 클릭해서 드롭다운 열기
-    target.click_input()
-    time.sleep(1)
-
-    # 3) 열린 드롭다운의 항목 목록 출력 — order_window 하위 재탐색
-    logging.info("===== 드롭다운 오픈 후 order_window 하위 트리 (ListItem 위주) =====")
-    _dump(order_window, max_depth=4)
-
-    # 4) 팝업이 order_window 밖(Desktop 최상위)에 별도로 뜨는 경우 대비
-    logging.info("===== Desktop 최상위에서 ListItem 직접 탐색 =====")
-    try:
-        desktop = Desktop(backend="uia")
-        for w in desktop.windows():
-            try:
-                for item in w.descendants(control_type="ListItem"):
-                    name = item.element_info.name
-                    if name.strip():
-                        logging.info(f"  ListItem: name='{name}' rect={item.rectangle()}")
-            except Exception:
-                continue
-    except Exception as e:
-        logging.warning(f"Desktop ListItem 탐색 실패: {e}")
+    # 2) 실제 코드와 동일한 {PGUP}{DOWN N}{ENTER}를 N=0..9까지 하나씩 실행하며
+    #    결과로 표시되는 값을 그대로 읽는다 — 이게 실제 order_type_index별 정답.
+    logging.info("===== N별 {PGUP}{DOWN N}{ENTER} 결과 확인 (N=0~9) =====")
+    for n in range(10):
+        target.click_input()
+        time.sleep(0.4)
+        send_keys(f"{{PGUP}}{{DOWN {n}}}{{ENTER}}")
+        time.sleep(0.5)
+        refreshed = []
+        try:
+            # 컨트롤 참조가 오래돼 무효화될 수 있어 매번 재탐색
+            refreshed = [
+                ctrl for ctrl in order_window.descendants()
+                if ctrl.element_info.control_type == "Pane"
+                and ctrl.element_info.automation_id == AUTO_ID_DROPDOWN_TYPE_BUY
+                and ctrl.element_info.name.strip()
+            ]
+            result_name = refreshed[0].element_info.name if refreshed else "(못찾음)"
+        except Exception as e:
+            result_name = f"(에러: {e})"
+        logging.info(f"  N={n} -> '{result_name}'")
+        # 다음 시도를 위해 target 참조 갱신
+        if refreshed:
+            target = refreshed[0]
 
     # ESC로 드롭다운 닫고 주문창 닫기 — 절대 주문 제출 안 함
     send_keys("{ESC}")
