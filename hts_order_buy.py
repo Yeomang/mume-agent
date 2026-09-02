@@ -15,7 +15,12 @@ CTRL_INDEX_DROPDOWN_ACCOUNT = 2  # order_window 하위 컨트롤 검색결과 �
 AUTO_ID_PASSWORD_DIALOG_OK_BUTTON = "2"  # 비밀번호 입력 안내창 확인 버튼 automation_id
 AUTO_ID_TICKER_BUY_INPUT = "3860"  # 매수 종목 입력 필드 automation_id
 AUTO_ID_DROPDOWN_TYPE_BUY = "3865"  # 매수 유형 드롭다운 필드 automation_id
-CTRL_INDEX_DROPDOWN_TYPE_BUY = 1  # order_window 하위 컨트롤 검색결과 매수 유형 드롭다운 필드 순번
+# order_window 하위 컨트롤 검색결과 매수 유형 드롭다운 필드 순번.
+# 2026-09 HTS 매수화면에 automation_id=3865로 매칭되는 Pane이 2개→3개로
+# 늘어나며(진단 결과: 상단 툴바 아이콘 1개 + 하단 미체결탭 위젯 1개가 추가로
+# 매칭) 실제 유형 드롭다운이 index=1→2로 밀림. order_type_index(0=보통,
+# 3=LOC 등) 자체는 그대로 맞음 — 컨트롤을 잘못 클릭해 못 건드리고 있었을 뿐.
+CTRL_INDEX_DROPDOWN_TYPE_BUY = 2
 AUTO_ID_QUANTITY_BUY_INPUT = "3900"  # 매수 수량 입력 필드 automation_id
 AUTO_ID_PRICE_BUY_INPUT = "3930"  # 매수 가격 입력 필드 automation_id
 HOTKEY_BUY = "{F1}"  # 매수 실행 버튼
