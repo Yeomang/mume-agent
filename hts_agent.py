@@ -102,6 +102,13 @@ PENDING_DEPLOY_LOCK = threading.Lock()
 app = FastAPI(title="HTS Agent")
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
+# VR 예약주문 에이전트 원격 설치 (/vr/install, /vr/install-status) — VR 웹 콘솔이 요청, 기존 mume 동작과 무관
+try:
+    from vr_installer import router as _vr_installer_router
+    app.include_router(_vr_installer_router)
+except Exception as _e:  # 설치 모듈 문제로 mume 에이전트가 멈추지 않게
+    logging.getLogger("hts_agent").warning(f"vr_installer 로드 실패: {_e}")
+
 
 @app.on_event("startup")
 def on_startup():
