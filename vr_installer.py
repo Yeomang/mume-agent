@@ -4,13 +4,16 @@ VR 예약주문 에이전트(vr-agent) 원격 설치 — VR 웹 콘솔(mume주�
 
   POST /vr/install          설치 시작 (백그라운드) — 이미 설치돼 있으면 코드만 갱신하고 설정·데이터는 유지
   GET  /vr/install-status   단계별 진행 상황
-  POST /vr/configure        설치 후 알림(텔레그램)·VR 계좌 비밀번호만 바꾸기 (재설치 없이)
-  GET  /vr/configure        현재 알림 방식·VR 전용 계좌 비밀번호 여부 (값은 돌려주지 않음)
+  POST /vr/configure        설치 후 알림(텔레그램)만 바꾸기 (재설치 없이)
+  GET  /vr/configure        현재 알림 방식 (값은 돌려주지 않음)
+  GET  /vr/passwords        VR 비밀번호 등록 상태 (사용자별 인증서·계좌별 계좌 비밀번호 — 설정 여부만)
+  POST /vr/passwords        VR 전용 비밀번호 저장/초기화 (무매와 다를 때만 — 없으면 무매 것을 씀)
 
 무한매수 쪽에서 이미 가진 것을 그대로 쓴다 (사용자가 다시 입력하지 않게):
   - 공동인증서·계좌 비밀번호: mume이 저장한 Credential Manager 항목 (vr-agent가 직접 읽음)
   - HTS 경로, 텔레그램 봇·채팅: 이 에이전트의 Config (콘솔 agent_settings에서 로드된 값)
-새로 받는 것은 팬딩 이메일/비밀번호와 웹 연결 키뿐이다.
+새로 받는 것은 팬딩 이메일/비밀번호와 웹 연결 키뿐이다. HTS 사용자·계좌는 웹 '계좌 관리'의 계좌마다 정해져
+플랜에 실려 오므로 설치 때 받지 않는다.
 
 보안: 코드는 VR 웹 콘솔(mume-console.vercel.app) 주소에서만, 웹 연결 키로 인증해 받는다
 (인증키가 새더라도 임의 주소의 코드를 설치시킬 수 없게 — /deploy의 GitHub 화이트리스트와 같은 취지).
@@ -188,13 +191,17 @@ def _install(p: dict):
         keyring.set_password("vr_console", "agent_key", p["agent_key"])
         cfg_path = VR_DIR / "vr_config.json"
         cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig")) if cfg_path.exists() else {}
+        if not p.get("telegram") and not cfg.get("telegram_mode"):
+            # 처음 설치: 무매 주문 알림 봇이 있으면 같이 쓰고, 없으면 웹 알림만 (나중에 웹 초기 설정에서 변경)
+            p["telegram"] = {"mode": "mume" if Config.TELEGRAM_BOT_TOKEN_ORDER and Config.TELEGRAM_CHAT_ID else "off"}
         notes = _apply_options(p, cfg)
         _step("secrets", "done", ", ".join(notes))
 
         # 6) 설정 — 있으면 필요한 값만 갱신 (플랜·모드 등 기존 값 유지)
         _step("config", "running")
+        if p["hts_user"]:  # 예전 콘솔 호환 — 지금은 플랜(계좌)마다 사용자가 정해짐
+            cfg["hts_user"] = p["hts_user"]
         cfg.update({
-            "hts_user": p["hts_user"],
             "hts_exe_path": cfg.get("hts_exe_path") or Config.HTS_EXE_PATH or r"C:\메리츠증권\iMERITZ XII\Main\imeritz.exe",
             "mume_agent_dir": str(BASE_DIR),
             "fanding_email": p["fanding_email"],
@@ -243,6 +250,7 @@ def vr_install(payload: dict = Body(...)):
     p = {k: (payload.get(k) or "").strip() if isinstance(payload.get(k), str) else payload.get(k)
          for k in ("console_url", "agent_key", "sha", "fanding_email", "fanding_password", "hts_user",
                    "account_password", "telegram")}
+    p["hts_user"] = p["hts_user"] or ""
     u = urlparse(p["console_url"] or "")
     if u.scheme != "https" or (u.hostname or "") not in ALLOWED_CONSOLE_HOSTS:
         raise HTTPException(status_code=403, detail="허용되지 않은 콘솔 주소입니다.")
@@ -251,8 +259,8 @@ def vr_install(payload: dict = Body(...)):
         raise HTTPException(status_code=400, detail="연결 키 형식이 올바르지 않습니다.")
     if not re.fullmatch(r"[0-9a-f]{7,40}", p["sha"] or ""):
         raise HTTPException(status_code=400, detail="버전 형식이 올바르지 않습니다.")
-    if not p["fanding_email"] or not p["fanding_password"] or not p["hts_user"]:
-        raise HTTPException(status_code=400, detail="팬딩 이메일·비밀번호와 HTS 사용자를 입력해 주세요.")
+    if not p["fanding_email"] or not p["fanding_password"]:
+        raise HTTPException(status_code=400, detail="팬딩 이메일·비밀번호를 입력해 주세요.")
     with _LOCK:
         if _RUNNING["on"]:
             raise HTTPException(status_code=409, detail="이미 설치가 진행 중이에요.")
@@ -304,3 +312,52 @@ def vr_configure(payload: dict = Body(...)):
         raise HTTPException(status_code=400, detail=str(e))
     cfg_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"status": "ok", "applied": notes}
+
+
+# ───────────────────────────── VR 비밀번호 등록 (무매 '⑦ HTS 비밀번호 등록'과 같은 방식)
+# VR 에이전트가 찾는 순서 — 인증서: vr_meritz_cert/<사용자> → 무매 mume_meritz_cert/<사용자>
+#                           계좌: vr_meritz_account/<계좌번호> → vr_meritz_account/default(예전 공통) → 무매 mume_meritz_account/<사용자>
+# 여기서는 VR 전용 항목만 쓰고 지운다 (무매 비밀번호는 무매 화면에서만 바뀜).
+_PW_KEY = {"cert": ("vr_meritz_cert", re.compile(r"^[^\s=,]{1,30}$")),
+           "account": ("vr_meritz_account", re.compile(r"^\d{4}-\d{4}-\d{2}$"))}
+
+
+@router.get("/vr/passwords")
+def vr_passwords_status(users: str = "", accounts: str = ""):
+    import keyring
+    from secrets_manager import SERVICE_ACCOUNT, SERVICE_CERT
+    has = lambda svc, key: bool(key and keyring.get_password(svc, key))
+    names = [u.strip() for u in users.split(",") if u.strip()][:30]
+    accs = [a.strip() for a in accounts.split(",") if a.strip()][:30]
+    return {
+        "users": [{"name": n, "cert_vr": has("vr_meritz_cert", n), "cert_mume": has(SERVICE_CERT, n),
+                   "account_mume": has(SERVICE_ACCOUNT, n)} for n in names],
+        "accounts": [{"account_no": a, "vr": has("vr_meritz_account", a)} for a in accs],
+        "vr_default": has("vr_meritz_account", "default"),
+    }
+
+
+@router.post("/vr/passwords")
+def vr_passwords_update(payload: dict = Body(...)):
+    """{"kind": "cert"|"account", "key": 사용자 이름|계좌번호, "password": 새 값} — password가 없으면 VR 전용 항목 삭제.
+    kind=account, key=default 삭제는 예전 '공통 VR 계좌 비밀번호' 정리용."""
+    import keyring
+    from keyring.errors import PasswordDeleteError
+    kind, key = payload.get("kind"), str(payload.get("key") or "").strip()
+    if kind not in _PW_KEY:
+        raise HTTPException(status_code=400, detail="kind는 cert 또는 account")
+    service, pattern = _PW_KEY[kind]
+    password = str(payload.get("password") or "")
+    legacy_default = kind == "account" and key == "default" and not password
+    if not legacy_default and not pattern.match(key):
+        raise HTTPException(status_code=400, detail="사용자 이름 또는 계좌번호 형식이 올바르지 않아요.")
+    if password:
+        if len(password) > 64:
+            raise HTTPException(status_code=400, detail="비밀번호가 너무 길어요.")
+        keyring.set_password(service, key, password)
+        return {"status": "saved"}
+    try:
+        keyring.delete_password(service, key)
+    except PasswordDeleteError:
+        pass
+    return {"status": "deleted"}

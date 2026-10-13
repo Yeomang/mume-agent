@@ -12,6 +12,7 @@
 
 | 날짜 | 내용 |
 |------|------|
+| 2026-10-13 | VR 설치에서 HTS 사용자 입력 제거(웹 '계좌 관리'의 계좌마다 지정) + `/vr/passwords` 추가 — 무매 '비밀번호 등록'처럼 사용자별 인증서·계좌별 계좌 비밀번호를 VR 전용으로 저장/초기화(없으면 무매 것 사용) |
 | 2026-10-13 | `/vr/configure` 조회: 알림 방식 기록이 없는 예전 설치는 저장된 봇 토큰이 무한매수 봇과 같은지로 판단(VR 전용 봇을 무매 봇으로 잘못 표시하던 문제) |
 | 2026-10-13 | 배포 시 `vr_installer.py`가 바뀌어도 에이전트 재시작 — 지금까지는 hts_agent.py가 바뀔 때만 재시작해 import된 모듈 변경(/vr/configure 추가)이 반영되지 않았음 |
 | 2026-10-13 | VR 설치 옵션 — 알림 방식(무매 주문 봇 공유/VR 전용 봇/끔)과 무매와 다른 VR 계좌 비밀번호를 설치 때 선택, 설치 후 `/vr/configure`로 재설치 없이 변경 |
@@ -193,7 +194,8 @@ mume-agent/
 | POST | `/deploy` | 원격 배포 (GitHub Release zip 다운로드 & 적용) |
 | POST | `/vr/install` | VR 예약주문 에이전트 원격 설치 (vr_installer.py, VR 웹 콘솔이 호출) |
 | GET | `/vr/install-status` | VR 설치 단계별 진행 |
-| GET/POST | `/vr/configure` | VR 알림(무매 봇/VR 전용 봇/끔)·VR 계좌 비밀번호 변경 |
+| GET/POST | `/vr/configure` | VR 알림(무매 봇/VR 전용 봇/끔) 변경 |
+| GET/POST | `/vr/passwords` | VR 비밀번호 등록 상태 조회·VR 전용 비밀번호 저장/초기화 (값은 돌려주지 않음) |
 | GET | `/deploy-status` | 현재 배포 버전 정보 조회 |
 
 **작업 실행 흐름 (`/run`):**
