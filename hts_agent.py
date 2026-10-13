@@ -890,7 +890,7 @@ def _execute_deploy(release_url: str, github_token: str = "") -> dict:
 
                     if fname == "requirements.txt":
                         requirements_changed = True
-                    if fname == "hts_agent.py":
+                    if fname in ("hts_agent.py", "vr_installer.py"):  # 에이전트 서버가 import하는 모듈도 재시작해야 반영
                         agent_changed = True
 
         # 4) requirements.txt 변경 시 pip install
