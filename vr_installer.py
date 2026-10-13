@@ -280,7 +280,12 @@ def vr_configure_get():
     import keyring
     cfg_path = VR_DIR / "vr_config.json"
     cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig")) if cfg_path.exists() else {}
-    return {"installed": cfg_path.exists(), "telegram_mode": cfg.get("telegram_mode") or ("mume" if cfg.get("telegram_chat_id") else "off"),
+    mode = cfg.get("telegram_mode")
+    if not mode:  # 예전 설치(모드 기록 없음) — 저장된 봇 토큰이 무한매수 봇과 같은지로 판단
+        token = keyring.get_password("vr_telegram", "bot_token")
+        mode = "off" if not (cfg.get("telegram_chat_id") and token) else (
+            "mume" if token == Config.TELEGRAM_BOT_TOKEN_ORDER else "own")
+    return {"installed": cfg_path.exists(), "telegram_mode": mode,
             "vr_account_password": bool(keyring.get_password("vr_meritz_account", "default")),
             "mume_telegram": bool(Config.TELEGRAM_BOT_TOKEN_ORDER and Config.TELEGRAM_CHAT_ID), "hts_user": cfg.get("hts_user", "")}
 
