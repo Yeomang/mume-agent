@@ -4,6 +4,8 @@ VR 예약주문 에이전트(vr-agent) 원격 설치 — VR 웹 콘솔(mume주�
 
   POST /vr/install          설치 시작 (백그라운드) — 이미 설치돼 있으면 코드만 갱신하고 설정·데이터는 유지
   GET  /vr/install-status   단계별 진행 상황
+  POST /vr/configure        설치 후 알림(텔레그램)·VR 계좌 비밀번호만 바꾸기 (재설치 없이)
+  GET  /vr/configure        현재 알림 방식·VR 전용 계좌 비밀번호 여부 (값은 돌려주지 않음)
 
 무한매수 쪽에서 이미 가진 것을 그대로 쓴다 (사용자가 다시 입력하지 않게):
   - 공동인증서·계좌 비밀번호: mume이 저장한 Credential Manager 항목 (vr-agent가 직접 읽음)
@@ -94,6 +96,40 @@ def _vr_running() -> bool:
     return r.stdout.strip() not in ("", "0")
 
 
+def _apply_options(p: dict, cfg: dict) -> list[str]:
+    """알림·계좌 비밀번호 옵션 적용. p['telegram'] = {'mode': 'mume'|'own'|'off', 'token', 'chat_id'},
+    p['account_password'] = VR 계좌 공통 비밀번호(무매와 다를 때만, 빈 값이면 그대로). 반환: 적용 내용."""
+    import keyring
+    notes = []
+    tg = p.get("telegram") or {}
+    mode = tg.get("mode")
+    if mode == "mume":
+        if Config.TELEGRAM_BOT_TOKEN_ORDER and Config.TELEGRAM_CHAT_ID:
+            # 무한매수 주문 알림 봇으로 VR 알림도 받는다 (무한매수 쪽은 보내기만 해서 충돌 없음)
+            keyring.set_password("vr_telegram", "bot_token", Config.TELEGRAM_BOT_TOKEN_ORDER)
+            cfg["telegram_chat_id"] = str(Config.TELEGRAM_CHAT_ID)
+            notes.append("알림: 무한매수 주문 알림 봇")
+        else:
+            cfg["telegram_chat_id"] = ""
+            notes.append("알림: 무한매수 봇 설정이 없어 웹 알림만")
+        cfg["telegram_mode"] = "mume"
+    elif mode == "own":
+        if not re.fullmatch(r"\d{6,}:[A-Za-z0-9_-]{30,}", tg.get("token") or "") or not re.fullmatch(r"-?\d{5,}", str(tg.get("chat_id") or "")):
+            raise RuntimeError("VR 전용 텔레그램 봇 토큰·채팅 ID 형식이 올바르지 않아요")
+        keyring.set_password("vr_telegram", "bot_token", tg["token"])
+        cfg["telegram_chat_id"] = str(tg["chat_id"])
+        cfg["telegram_mode"] = "own"
+        notes.append("알림: VR 전용 봇")
+    elif mode == "off":
+        cfg["telegram_chat_id"] = ""
+        cfg["telegram_mode"] = "off"
+        notes.append("알림: 텔레그램 끔(웹만)")
+    if p.get("account_password"):
+        keyring.set_password("vr_meritz_account", "default", p["account_password"])
+        notes.append("VR 계좌 비밀번호 저장")
+    return notes
+
+
 def _install(p: dict):
     try:
         # 1) 코드 내려받기 — 최상위 파일만 (vr_config.json·data·.venv 는 그대로)
@@ -150,17 +186,13 @@ def _install(p: dict):
         import keyring
         keyring.set_password("vr_fanding", p["fanding_email"], p["fanding_password"])
         keyring.set_password("vr_console", "agent_key", p["agent_key"])
-        notes = []
-        if Config.TELEGRAM_BOT_TOKEN_ORDER and not keyring.get_password("vr_telegram", "bot_token"):
-            # 무한매수 주문 알림 봇으로 VR 알림도 받는다 (무한매수 쪽은 보내기만 해서 충돌 없음)
-            keyring.set_password("vr_telegram", "bot_token", Config.TELEGRAM_BOT_TOKEN_ORDER)
-            notes.append("텔레그램: 무한매수 주문 알림 봇 사용")
+        cfg_path = VR_DIR / "vr_config.json"
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig")) if cfg_path.exists() else {}
+        notes = _apply_options(p, cfg)
         _step("secrets", "done", ", ".join(notes))
 
         # 6) 설정 — 있으면 필요한 값만 갱신 (플랜·모드 등 기존 값 유지)
         _step("config", "running")
-        cfg_path = VR_DIR / "vr_config.json"
-        cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig")) if cfg_path.exists() else {}
         cfg.update({
             "hts_user": p["hts_user"],
             "hts_exe_path": cfg.get("hts_exe_path") or Config.HTS_EXE_PATH or r"C:\메리츠증권\iMERITZ XII\Main\imeritz.exe",
@@ -168,8 +200,6 @@ def _install(p: dict):
             "fanding_email": p["fanding_email"],
             "console_url": p["console_url"],
         })
-        if Config.TELEGRAM_CHAT_ID and not cfg.get("telegram_chat_id"):
-            cfg["telegram_chat_id"] = str(Config.TELEGRAM_CHAT_ID)
         cfg.setdefault("dry_run", True)      # 처음엔 테스트 모드 — 웹 설정에서 실주문으로
         cfg.setdefault("plans", [])          # 플랜은 웹 '내 플랜'에서
         cfg_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -211,7 +241,8 @@ def _install(p: dict):
 @router.post("/vr/install")
 def vr_install(payload: dict = Body(...)):
     p = {k: (payload.get(k) or "").strip() if isinstance(payload.get(k), str) else payload.get(k)
-         for k in ("console_url", "agent_key", "sha", "fanding_email", "fanding_password", "hts_user")}
+         for k in ("console_url", "agent_key", "sha", "fanding_email", "fanding_password", "hts_user",
+                   "account_password", "telegram")}
     u = urlparse(p["console_url"] or "")
     if u.scheme != "https" or (u.hostname or "") not in ALLOWED_CONSOLE_HOSTS:
         raise HTTPException(status_code=403, detail="허용되지 않은 콘솔 주소입니다.")
@@ -242,3 +273,29 @@ def vr_install_status():
         return json.loads(STATUS_FILE.read_text(encoding="utf-8"))
     except Exception:
         return {"state": "none"}
+
+
+@router.get("/vr/configure")
+def vr_configure_get():
+    import keyring
+    cfg_path = VR_DIR / "vr_config.json"
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig")) if cfg_path.exists() else {}
+    return {"installed": cfg_path.exists(), "telegram_mode": cfg.get("telegram_mode") or ("mume" if cfg.get("telegram_chat_id") else "off"),
+            "vr_account_password": bool(keyring.get_password("vr_meritz_account", "default")),
+            "mume_telegram": bool(Config.TELEGRAM_BOT_TOKEN_ORDER and Config.TELEGRAM_CHAT_ID), "hts_user": cfg.get("hts_user", "")}
+
+
+@router.post("/vr/configure")
+def vr_configure(payload: dict = Body(...)):
+    """설치 후 알림 방식·VR 계좌 비밀번호만 변경 — 적용은 VR 에이전트 재시작 때(웹이 재시작 명령을 함께 보냄)."""
+    cfg_path = VR_DIR / "vr_config.json"
+    if not cfg_path.exists():
+        raise HTTPException(status_code=404, detail="VR 에이전트가 아직 설치돼 있지 않아요.")
+    p = {"telegram": payload.get("telegram"), "account_password": (payload.get("account_password") or "").strip()}
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
+    try:
+        notes = _apply_options(p, cfg)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    cfg_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"status": "ok", "applied": notes}

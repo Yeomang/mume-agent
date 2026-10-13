@@ -12,6 +12,7 @@
 
 | 날짜 | 내용 |
 |------|------|
+| 2026-10-13 | VR 설치 옵션 — 알림 방식(무매 주문 봇 공유/VR 전용 봇/끔)과 무매와 다른 VR 계좌 비밀번호를 설치 때 선택, 설치 후 `/vr/configure`로 재설치 없이 변경 |
 | 2026-10-13 | VR 예약주문 에이전트 원격 설치(`vr_installer.py`, `/vr/install`·`/vr/install-status`) — VR 웹 콘솔 설정에서 [서버에 설치]를 누르면 이 에이전트가 vr-agent를 mume-agent 옆 `vr-agent` 폴더에 내려받아(VR 콘솔 주소만 허용, 연결 키 인증) 가상환경·패키지 설치, 팬딩 로그인 확인 후 비밀번호·연결 키 저장, 설정 생성(HTS 경로·텔레그램은 이 에이전트 값 재사용, 인증서·계좌 비밀번호는 mume 항목을 vr-agent가 직접 읽음), 로그온 자동 실행(`VR_Agent_Startup`) 등록·시작. 기존 mume 작업·파일과 무관 |
 | 2026-09-02 | 8/27경부터 매수 LOC 주문이 전부 지정가(보통)로 잘못 접수되던 버그 수정(`hts_order_buy.py`). 메리츠 HTS 매수화면에 새 알고리즘 주문유형(LOO 등)이 추가되며 automation_id="3865"로 매칭되는 컨트롤이 2개→3개로 늘어, 실제 유형 드롭다운을 찾는 `CTRL_INDEX_DROPDOWN_TYPE_BUY`가 index=1(엉뚱한 무관 컨트롤)을 클릭하고 있었음 — 진단 스크립트(`diagnose_buy_type_dropdown.py`)로 실주문 없이 `{PGUP}{DOWN N}{ENTER}` 결과를 N별로 직접 확인해 index=2가 실제 드롭다운임을 확정. `order_type_index` 값(0=보통, 3=LOC 등)은 그대로 유효함을 함께 확인 — 컨트롤을 못 찾아 값 자체를 못 넣고 있었을 뿐 |
 | 2026-08-22 | LOC 매도가 실시간가 기준 자동 보정(`_apply_price_guard()`, 8/1~8/4 도입)을 제거 — LOC 매도가는 다시 계산가 그대로 주문한다. 재검토 결과 매도 주문가 자체를 바꾸는 건 원치 않는 방향으로 결론(`hts_orders_from_supabase.py`). 대신 브로커가 거부한 매도 주문을 애프터마켓 job이 감지해 원래 가격 그대로 지정가로 재주문하도록 신규 추가 — 거부 후 장중 상승으로 원래 체결됐어야 하는 케이스를 놓치지 않기 위함(현재가 사전 체크 없이 지정가로 넣어 시장에 맡김)(`hts_orders_aftermarket.py`) |
@@ -188,6 +189,9 @@ mume-agent/
 | POST | `/update-passwords` | 비밀번호 저장 (Windows Credential Manager) |
 | POST | `/delete-passwords` | 비밀번호 삭제 |
 | POST | `/deploy` | 원격 배포 (GitHub Release zip 다운로드 & 적용) |
+| POST | `/vr/install` | VR 예약주문 에이전트 원격 설치 (vr_installer.py, VR 웹 콘솔이 호출) |
+| GET | `/vr/install-status` | VR 설치 단계별 진행 |
+| GET/POST | `/vr/configure` | VR 알림(무매 봇/VR 전용 봇/끔)·VR 계좌 비밀번호 변경 |
 | GET | `/deploy-status` | 현재 배포 버전 정보 조회 |
 
 **작업 실행 흐름 (`/run`):**
