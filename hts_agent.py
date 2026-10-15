@@ -1077,9 +1077,21 @@ def deploy_status():
         return {"deployed_at": None, "message": "배포 이력이 없습니다."}
     try:
         data = json.loads(DEPLOY_INFO_FILE.read_text(encoding="utf-8"))
+        data["db_mode"] = _db_mode()
         return data
     except Exception:
-        return {"deployed_at": None, "message": "배포 정보를 읽을 수 없습니다."}
+        return {"deployed_at": None, "message": "배포 정보를 읽을 수 없습니다.", "db_mode": _db_mode()}
+
+
+def _db_mode() -> str:
+    """DB 접속 방식 — 'token'(에이전트 DB 토큰, RLS 대응) / 'anon'(공개 키) / 'none'.
+    아직 접속 전이면 한 번 접속해 본다 (콘솔이 RLS 켜기 전에 전 서버가 token인지 확인용)."""
+    try:
+        from supabase_client import db_mode, get_supabase_client
+        get_supabase_client()
+        return db_mode()
+    except Exception:
+        return "error"
 
 
 @app.get("/cash-balance")
