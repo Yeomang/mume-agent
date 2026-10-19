@@ -10,6 +10,7 @@ VR 예약주문 에이전트(vr-agent) 원격 설치 — VR 웹 콘솔(mume주�
   POST /vr/passwords        VR 전용 비밀번호 저장/초기화 (무매와 다를 때만 — 없으면 무매 것을 씀)
   GET  /vr/agent-status     VR 에이전트(main_vr.py) 실행 여부·마지막 응답·감시 기록
   POST /vr/agent-restart    VR 에이전트만 다시 켜기 (웹 '다시 시작' 버튼)
+  GET  /vr/logs             VR 에이전트 로그 끝부분 (원격 진단)
 
 VR 감시(워치독): 무매 에이전트가 5분마다 VR 에이전트를 확인해 꺼져 있거나(창이 닫힘) 멈춰 있으면(alive.json이
 20분 넘게 안 바뀜) VR 에이전트만 다시 켠다 — 서버에 무매 에이전트만 켜져 있으면 VR도 유지되게.
@@ -236,6 +237,20 @@ def vr_agent_status():
     pids = _vr_pids() if os.name == "nt" else []
     return {"installed": True, "running": bool(pids), "pids": pids, "alive": _alive(),
             "tasks": _tasks() if os.name == "nt" else [], "watchdog": _WD}
+
+
+@router.get("/vr/logs")
+def vr_logs(max_lines: int = 300):
+    """VR 에이전트 로그(vr-agent/log.log) 끝부분 — 원격 진단용 (비밀번호는 로그에 남기지 않음)."""
+    path = VR_DIR / "log.log"
+    if not path.exists():
+        return {"text": "(로그 파일 없음)"}
+    max_lines = max(10, min(int(max_lines), 3000))
+    with path.open("rb") as f:
+        f.seek(0, os.SEEK_END)
+        f.seek(max(0, f.tell() - max_lines * 300))
+        text = f.read().decode("utf-8", errors="ignore")
+    return {"text": "\n".join(text.splitlines()[-max_lines:])}
 
 
 @router.post("/vr/agent-restart")
