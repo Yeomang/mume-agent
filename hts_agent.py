@@ -115,6 +115,11 @@ def on_startup():
     _agent_logger.info("═══ HTS Agent 서버 시작 (port 9000) ═══")
     threading.Thread(target=_job_log_monitor_loop, daemon=True, name="job-log-monitor").start()
     threading.Thread(target=_pending_deploy_monitor_loop, daemon=True, name="pending-deploy-monitor").start()
+    try:  # VR 감시 — 서버에 VR 에이전트가 설치돼 있으면 꺼짐/멈춤 시 VR만 다시 켬 (mume 동작과 무관)
+        from vr_installer import start_vr_watchdog
+        start_vr_watchdog()
+    except Exception as _e:
+        _agent_logger.warning(f"VR 감시 시작 실패: {_e}")
 
 
 @app.on_event("shutdown")

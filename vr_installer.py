@@ -8,6 +8,12 @@ VR 예약주문 에이전트(vr-agent) 원격 설치 — VR 웹 콘솔(mume주�
   GET  /vr/configure        현재 알림 방식 (값은 돌려주지 않음)
   GET  /vr/passwords        VR 비밀번호 등록 상태 (사용자별 인증서·계좌별 계좌 비밀번호 — 설정 여부만)
   POST /vr/passwords        VR 전용 비밀번호 저장/초기화 (무매와 다를 때만 — 없으면 무매 것을 씀)
+  GET  /vr/agent-status     VR 에이전트(main_vr.py) 실행 여부·마지막 응답·감시 기록
+  POST /vr/agent-restart    VR 에이전트만 다시 켜기 (웹 '다시 시작' 버튼)
+
+VR 감시(워치독): 무매 에이전트가 5분마다 VR 에이전트를 확인해 꺼져 있거나(창이 닫힘) 멈춰 있으면(alive.json이
+20분 넘게 안 바뀜) VR 에이전트만 다시 켠다 — 서버에 무매 에이전트만 켜져 있으면 VR도 유지되게.
+VR 프로세스는 PID로만 종료한다(python 전체 종료 금지). HTS가 떠 있으면(주문 중일 수 있음) 90분까지 기다린다.
 
 무한매수 쪽에서 이미 가진 것을 그대로 쓴다 (사용자가 다시 입력하지 않게):
   - 공동인증서·계좌 비밀번호: mume이 저장한 Credential Manager 항목 (vr-agent가 직접 읽음)
@@ -97,6 +103,148 @@ def _vr_running() -> bool:
               "(Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
               "Where-Object { $_.CommandLine -like '*main_vr.py*' } | Measure-Object).Count"], timeout=30)
     return r.stdout.strip() not in ("", "0")
+
+
+# ───────────────────────────── VR 감시 (워치독)
+import logging
+import time
+
+_log = logging.getLogger("hts_agent")
+AUTOSTART_TASKS = (TASK_NAME, "VR Agent")       # 웹 설치 / 예전 수동 설치(setup_vr.py 안내) 작업 이름
+ALIVE_FILE = VR_DIR / "data" / "alive.json"
+WATCH_INTERVAL_SEC = 300
+STALE_MIN = 20          # alive.json이 이만큼 안 바뀌면 멈춘 것으로 봄
+STALE_HTS_MIN = 90      # HTS가 떠 있으면(주문 중일 수 있음) 이만큼까지 기다림
+MAX_RESTARTS_PER_HOUR = 3
+_WD: dict = {"started": False, "last_check": None, "actions": []}
+
+
+def _ps(cmd: str, timeout: int = 30) -> str:
+    return _run(["powershell", "-NoProfile", "-Command", cmd], timeout=timeout).stdout.strip()
+
+
+def _pids(name: str, like: str) -> list[int]:
+    """CommandLine에 like가 들어간 name 프로세스 PID들."""
+    out = _ps(f"Get-CimInstance Win32_Process -Filter \"Name='{name}'\" | "
+              f"Where-Object {{ $_.CommandLine -like '*{like}*' }} | ForEach-Object {{ $_.ProcessId }}")
+    return [int(x) for x in out.split() if x.strip().isdigit()]
+
+
+def _vr_pids() -> list[int]:
+    return _pids("python.exe", "main_vr.py")
+
+
+def _hts_open() -> bool:
+    return bool(_ps("(Get-Process imeritz -ErrorAction SilentlyContinue | Measure-Object).Count") not in ("", "0"))
+
+
+def _tasks() -> list[str]:
+    return [t for t in AUTOSTART_TASKS if _run(["schtasks", "/query", "/tn", t], timeout=20).returncode == 0]
+
+
+def _alive() -> dict | None:
+    try:
+        a = json.loads(ALIVE_FILE.read_text(encoding="utf-8"))
+        a["age_min"] = round((dt.datetime.now() - dt.datetime.fromisoformat(a["at"])).total_seconds() / 60, 1)
+        return a
+    except Exception:
+        return None
+
+
+def _installed() -> bool:
+    return (VR_DIR / "vr_config.json").exists() and (VR_DIR / "run_vr_agent.bat").exists()
+
+
+def _record(action: str, detail: str):
+    _WD["actions"] = (_WD["actions"] + [{"at": _now(), "action": action, "detail": detail}])[-20:]
+    _log.warning(f"[VR 감시] {action}: {detail}")
+
+
+def restart_vr(reason: str) -> dict:
+    """VR 에이전트만 다시 켠다: 실행 창(run_vr_agent.bat)·main_vr.py를 PID로 종료 → 자동 시작 작업 실행."""
+    if os.name != "nt":
+        return {"ok": False, "detail": "Windows 전용"}
+    killed = []
+    for pid in _pids("cmd.exe", "run_vr_agent.bat") + _vr_pids():   # 창(루프)부터 — 남아 있으면 30초 뒤 또 켜므로
+        r = _run(["taskkill", "/PID", str(pid), "/T", "/F"], timeout=20)
+        if r.returncode == 0:
+            killed.append(pid)
+    tasks = _tasks()
+    for t in tasks:
+        _run(["schtasks", "/end", "/tn", t], timeout=20)
+    time.sleep(3)
+    if tasks:
+        r = _run(["schtasks", "/run", "/tn", tasks[0]], timeout=60)
+        ok, how = r.returncode == 0, f"작업 스케줄러 '{tasks[0]}' 실행" + ("" if r.returncode == 0 else f" 실패: {r.stderr.strip()[-150:]}")
+    else:  # 자동 시작 작업이 없는 설치 — 창을 직접 띄움 (이 에이전트처럼 관리자·데스크톱 세션)
+        subprocess.Popen(["cmd", "/c", "start", "VR Agent", str(VR_DIR / "run_vr_agent.bat")], cwd=str(VR_DIR))
+        ok, how = True, "실행 창 직접 시작 (자동 시작 작업 없음)"
+    detail = f"{reason} — 종료 {len(killed)}개 · {how}"
+    _record("restart" if ok else "restart_failed", detail)
+    return {"ok": ok, "detail": detail, "killed": killed, "tasks": tasks}
+
+
+def _recent_restarts() -> int:
+    hour_ago = (dt.datetime.now() - dt.timedelta(hours=1)).isoformat(timespec="seconds")
+    return sum(1 for a in _WD["actions"] if a["action"].startswith("restart") and a["at"] >= hour_ago)
+
+
+def _watch_tick():
+    _WD["last_check"] = _now()
+    if os.name != "nt" or not _installed() or _RUNNING["on"]:
+        return
+    try:
+        if json.loads((VR_DIR / "vr_config.json").read_text(encoding="utf-8-sig")).get("watchdog") is False:
+            return
+    except Exception:
+        pass
+    if _recent_restarts() >= MAX_RESTARTS_PER_HOUR:
+        return
+    if not _vr_pids():
+        time.sleep(45)  # 업데이트·오류 재시작이면 실행 창이 30초 안에 다시 켬
+        if not _vr_pids():
+            restart_vr("VR 에이전트가 꺼져 있음")
+        return
+    a = _alive()
+    if a and a["age_min"] >= STALE_MIN:
+        if _hts_open() and a["age_min"] < STALE_HTS_MIN:
+            return  # 주문 중일 수 있어 더 기다림
+        restart_vr(f"VR 에이전트 응답 없음 ({a['age_min']:.0f}분)")
+
+
+def _watch_loop():
+    time.sleep(120)  # 서버가 막 켜졌으면 VR 자동 시작이 먼저 돌게
+    while True:
+        try:
+            _watch_tick()
+        except Exception as e:
+            _log.warning(f"[VR 감시] 확인 실패: {e}")
+        time.sleep(WATCH_INTERVAL_SEC)
+
+
+def start_vr_watchdog():
+    if _WD["started"] or os.name != "nt":
+        return
+    _WD["started"] = True
+    threading.Thread(target=_watch_loop, daemon=True, name="vr-watchdog").start()
+
+
+@router.get("/vr/agent-status")
+def vr_agent_status():
+    if not _installed():
+        return {"installed": False}
+    pids = _vr_pids() if os.name == "nt" else []
+    return {"installed": True, "running": bool(pids), "pids": pids, "alive": _alive(),
+            "tasks": _tasks() if os.name == "nt" else [], "watchdog": _WD}
+
+
+@router.post("/vr/agent-restart")
+def vr_agent_restart():
+    if not _installed():
+        raise HTTPException(status_code=404, detail="VR 에이전트가 설치돼 있지 않아요.")
+    if _RUNNING["on"]:
+        raise HTTPException(status_code=409, detail="VR 설치가 진행 중이에요. 끝난 뒤 다시 시도해 주세요.")
+    return restart_vr("웹에서 다시 시작")
 
 
 def _apply_options(p: dict, cfg: dict) -> list[str]:
