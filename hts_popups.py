@@ -109,10 +109,15 @@ def click_button(hwnd, text: str, allow_close: bool = False) -> bool:
             pass
         from pywinauto import Application
         w = Application(backend="uia").connect(handle=hwnd).window(handle=hwnd)
-        w.child_window(title=text, control_type="Button").invoke()
-        if gone():
-            logging.info(f"'{title}' '{text}' 처리: UIA 버튼 클릭으로 닫힘")
-            return True
+        btn = w.child_window(title=text, control_type="Button")
+        if btn.exists(timeout=1):   # 기본 대기(5초)만큼 팝업이 남아 자동화를 막지 않게 짧게
+            btn.invoke()
+            if gone():
+                logging.info(f"'{title}' '{text}' 처리: UIA 버튼 클릭으로 닫힘")
+                return True
+        else:
+            logging.info(f"'{title}' 창에 UIA '{text}' 버튼 없음")
+            _log_controls(hwnd, w)
     except Exception as e:
         logging.warning(f"'{title}' 창의 '{text}' 버튼 UIA 클릭 실패: {e}")
     if allow_close:
@@ -122,6 +127,39 @@ def click_button(hwnd, text: str, allow_close: bool = False) -> bool:
             return True
     logging.error(f"'{title}' 창의 '{text}' 버튼을 누르지 못했습니다.")
     return False
+
+
+_controls_logged: set[str] = set()
+
+
+def _log_controls(hwnd, uia_window=None):
+    """버튼을 못 찾은 창의 컨트롤 구조를 (창 제목당 한 번) 로그에 남긴다 — KNOWN_POPUPS 버튼 지정 방법을 정하기 위해."""
+    import win32gui
+    title = win32gui.GetWindowText(hwnd)
+    if title in _controls_logged:
+        return
+    _controls_logged.add(title)
+    rows = []
+
+    def child(h, _):
+        try:
+            rows.append(f"{win32gui.GetClassName(h)}:'{win32gui.GetWindowText(h)[:30]}'")
+        except Exception:
+            pass
+        return True
+    try:
+        win32gui.EnumChildWindows(hwnd, child, None)
+    except Exception:
+        pass
+    logging.info(f"'{title}' win32 자식 컨트롤 {len(rows)}개: {' | '.join(rows[:30])}")
+    if uia_window is not None:
+        try:
+            items = [f"{d.element_info.control_type}:'{d.window_text()[:30]}'"
+                     f"{'#' + d.element_info.automation_id if d.element_info.automation_id else ''}"
+                     for d in uia_window.descendants()[:60]]
+            logging.info(f"'{title}' UIA 컨트롤 {len(items)}개: {' | '.join(items)}")
+        except Exception as e:
+            logging.info(f"'{title}' UIA 컨트롤 목록 실패: {e}")
 
 
 # ───────────────────────────────────────────── 1) 알려진 팝업 감시
