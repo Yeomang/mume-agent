@@ -85,9 +85,11 @@ def click_button(hwnd, text: str, allow_close: bool = False) -> bool:
         win32gui.EnumChildWindows(hwnd, child, None)
     except Exception:
         pass
+    title = win32gui.GetWindowText(hwnd)
     if buttons:
         win32gui.SendMessage(buttons[0], BM_CLICK, 0, 0)
         if gone():
+            logging.info(f"'{title}' '{text}' 처리: win32 버튼 클릭으로 닫힘")
             return True
         try:   # 비활성 대화상자는 BM_CLICK이 안 먹을 수 있어 앞으로 가져와 한 번 더
             win32gui.SetForegroundWindow(hwnd)
@@ -95,7 +97,10 @@ def click_button(hwnd, text: str, allow_close: bool = False) -> bool:
             pass
         win32gui.SendMessage(buttons[0], BM_CLICK, 0, 0)
         if gone():
+            logging.info(f"'{title}' '{text}' 처리: win32 버튼 클릭(창 앞으로 가져온 뒤)으로 닫힘")
             return True
+    else:
+        logging.info(f"'{title}' 창에 win32 '{text}' 버튼 없음 — UIA로 찾기")
     try:   # 자체 그린 버튼 — UIA Invoke (마우스 이동 없음)
         try:
             import pythoncom
@@ -106,15 +111,16 @@ def click_button(hwnd, text: str, allow_close: bool = False) -> bool:
         w = Application(backend="uia").connect(handle=hwnd).window(handle=hwnd)
         w.child_window(title=text, control_type="Button").invoke()
         if gone():
+            logging.info(f"'{title}' '{text}' 처리: UIA 버튼 클릭으로 닫힘")
             return True
     except Exception as e:
-        logging.warning(f"'{win32gui.GetWindowText(hwnd)}' 창의 '{text}' 버튼 UIA 클릭 실패: {e}")
+        logging.warning(f"'{title}' 창의 '{text}' 버튼 UIA 클릭 실패: {e}")
     if allow_close:
         win32gui.PostMessage(hwnd, WM_CLOSE, 0, 0)
         if gone():
-            logging.info(f"'{text}' 버튼 대신 창 닫기로 처리")
+            logging.info(f"'{title}' '{text}' 처리: 버튼을 못 찾아 창 닫기(X)로 닫힘")
             return True
-    logging.error(f"'{win32gui.GetWindowText(hwnd)}' 창의 '{text}' 버튼을 누르지 못했습니다.")
+    logging.error(f"'{title}' 창의 '{text}' 버튼을 누르지 못했습니다.")
     return False
 
 
