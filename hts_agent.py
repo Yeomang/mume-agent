@@ -27,6 +27,7 @@ from starlette.middleware.gzip import GZipMiddleware
 
 import logging
 
+import cert_guard
 from config import Config
 from job_control import read_job_pids, unregister_job_pid
 from secrets_manager import (
@@ -144,7 +145,7 @@ async def verify_agent_key(request: Request, call_next):
             return JSONResponse(status_code=401, content={"detail": "Invalid agent key"})
     response = await call_next(request)
     # 폴링성 GET 요청은 로깅 제외 (health, monitor, status, logs, processes 등)
-    _skip_log = {"/health", "/monitor", "/status", "/logs", "/processes", "/password-status", "/deploy-status"}
+    _skip_log = {"/health", "/monitor", "/status", "/logs", "/processes", "/password-status", "/deploy-status", "/cert-status"}
     if request.url.path not in _skip_log:
         _agent_logger.info(f"{request.method} {request.url.path} → {response.status_code}")
     return response
@@ -688,8 +689,27 @@ def get_password_status(users: str | None = None):
             "name": user_name,
             "cert_set": cert_pw is not None and cert_pw != "",
             "account_set": account_pw is not None and account_pw != "",
+            # 저장된 공동인증서 비밀번호가 증권사에서 거부된 적 있음 → 다시 저장하거나 /cert-unlock 전까지 로그인 안 함
+            "cert_rejected": cert_guard.is_rejected(user_name, cert_pw),
         })
     return {"users": result}
+
+
+@app.post("/cert-unlock")
+def cert_unlock(payload: dict = Body(...)):
+    """공동인증서 비밀번호 거부 기록 해제 — 같은 비밀번호가 실제로 맞을 때 (다른 비밀번호를 저장하면 자동으로 풀림)."""
+    user = (payload.get("user") or "").strip()
+    if not user:
+        raise HTTPException(status_code=400, detail="user는 필수입니다.")
+    cert_guard.clear_rejected(user)
+    write_log("CERT_UNLOCK", "config", f"user={user}")
+    return {"message": f"{user}님의 공동인증서 로그인을 다시 시도할 수 있게 풀었습니다."}
+
+
+@app.get("/cert-status")
+def cert_status():
+    """HTS 로그인 때 '인증서 만료공지'로 확인한 사용자별 만료 예정 정보 (콘솔 팝업·배너용)."""
+    return {"certs": cert_guard.status_for_display()}
 
 
 @app.post("/update-passwords")
@@ -895,7 +915,7 @@ def _execute_deploy(release_url: str, github_token: str = "") -> dict:
 
                     if fname == "requirements.txt":
                         requirements_changed = True
-                    if fname in ("hts_agent.py", "vr_installer.py"):  # 에이전트 서버가 import하는 모듈도 재시작해야 반영
+                    if fname in ("hts_agent.py", "vr_installer.py", "cert_guard.py"):  # 에이전트 서버가 import하는 모듈도 재시작해야 반영
                         agent_changed = True
 
         # 4) requirements.txt 변경 시 pip install

@@ -4,7 +4,7 @@
 
 웹 콘솔([mume-console](../mume-console))에서 HTTP API로 제어하며, 스케줄 또는 수동으로 작업을 실행한다.
 
-> **최종 업데이트:** 2026-10-19
+> **최종 업데이트:** 2026-11-01
 
 ---
 
@@ -12,6 +12,7 @@
 
 | 날짜 | 내용 |
 |------|------|
+| 2026-11-01 | `cert_guard.py` 추가(vr-agent와 같은 파일) — HTS 로그인 중 '인증서 만료공지'를 '확인'으로 닫고 작업별 봇으로 텔레그램 알림·`/cert-status`로 콘솔 표시(공지가 로그인을 막아 300초 대기 후 실패하던 문제), VR의 공동인증서 비밀번호 거부 차단을 무매에도 적용(`/cert-unlock`, `/password-status`의 `cert_rejected`), 갱신 후 인증서가 여러 개면 만료일이 가장 늦은 것 선택 |
 | 2026-10-19 | `GET /vr/logs` — VR 에이전트 로그(vr-agent/log.log) 끝부분을 원격으로 확인 (서버 화면 없이 VR 문제 진단) |
 | 2026-10-19 | VR 감시(워치독) — 무매 에이전트가 5분마다 VR 에이전트(main_vr.py)를 확인해 꺼져 있거나(창 닫힘) 멈춰 있으면(`vr-agent/data/alive.json` 20분 이상 정지, HTS가 떠 있으면 90분까지 대기) VR만 PID로 종료 후 자동 시작 작업으로 다시 켬(시간당 최대 3회, `vr_config.json`의 `watchdog: false`로 끔). `GET /vr/agent-status`·`POST /vr/agent-restart`(웹 '다시 시작' 버튼) 추가. 서버에 무매 에이전트만 켜져 있으면 VR도 유지되도록 — VR 에이전트 창이 닫혀 18시간 오프라인이던 사례 |
 | 2026-10-15 | [보안] DB 접속을 '에이전트 DB 토큰'으로 — 콘솔 `/api/agent/db-token`(X-Agent-Key)에서 6시간 JWT(이 서버 사용자 목록)를 받아 접속, 만료 30분 전 갱신. 무매 테이블 RLS 적용 대비(공개 키로는 행이 안 보이게 됨). 토큰 실패 시 공개 키 폴백, 현재 방식은 `/deploy-status`의 `db_mode` |
@@ -126,6 +127,7 @@ mume-agent/
 ├── main_refresh_daily_return.py  # 일별 계좌수익률 수동 재조회 (기간 지정 가능)
 │
 ├── hts_login.py                  # HTS 실행 + 공동인증서 로그인
+├── cert_guard.py                 # 공동인증서 로그인 보호 (vr-agent와 같은 파일 — scripts/check_shared.sh로 확인)
 ├── hts_order_buy.py              # 해외주식 매수 주문 ([6100] 화면)
 ├── hts_order_sell.py             # 해외주식 매도 주문 ([6100] 화면)
 ├── hts_cancel_orders.py          # 미체결 주문 일괄 취소 ([6100] 미체결 탭)
@@ -191,7 +193,9 @@ mume-agent/
 | GET | `/status?job=<type>` | 작업 상태 조회 (`never_run` / `running` / `success` / `error` / `stopped`) |
 | GET | `/logs` | log.log tail 조회 |
 | GET | `/processes` | HTS/Python 프로세스 상태 조회 |
-| GET | `/password-status?users=<csv>` | 비밀번호 설정 여부 확인 |
+| GET | `/password-status?users=<csv>` | 비밀번호 설정 여부 확인 (+ `cert_rejected`: 공동인증서 비밀번호 거부 기록) |
+| POST | `/cert-unlock` | 공동인증서 비밀번호 거부 기록 해제 (`{"user"}` — 같은 비밀번호가 실제로 맞을 때) |
+| GET | `/cert-status` | 인증서 만료공지로 확인한 사용자별 만료 예정 (`{"certs": [{user, expire, days_left, seen_at, message}]}`) |
 | POST | `/update-passwords` | 비밀번호 저장 (Windows Credential Manager) |
 | POST | `/delete-passwords` | 비밀번호 삭제 |
 | POST | `/deploy` | 원격 배포 (GitHub Release zip 다운로드 & 적용) |
@@ -260,13 +264,28 @@ def main():
   1. imeritz.exe 기존 프로세스 강제 종료 (TASKKILL)
   2. 관리자 권한으로 HTS 재실행 (ShellExecuteEx "runas")
   3. "인증서 선택" 창이 뜰 때까지 대기 (최대 300초)
-  4. 인증서 목록에서 "증권(개인)" + 사용자명 조건으로 항목 선택
+  0. (시작 전) 저장된 공동인증서 비밀번호가 거부 기록에 있으면 HTS를 켜지 않고 실패 + 텔레그램
+  4. 인증서 목록에서 "증권(개인)" + 사용자명 조건으로 항목 선택 (여러 개면 만료일이 가장 늦은 것)
   5. Windows Credential Manager에서 비밀번호 조회 후 입력
   6. "인증서 선택(확인)" 버튼 클릭
-  7. "iMeritz" 메인 창 확인 + 창 포커싱/최대화
-  8. ESC 10회 → 불필요한 팝업 닫기
+  7. 로그인 결과 대기 (cert_guard.wait_login_result, 최대 300초)
+     - "iMeritz" 메인 창 → 성공
+     - "인증서 만료공지" → '확인'만 클릭('갱신'·Enter 금지 — 로그인이 중단됨), 남은 일수·만료일 기록 + 텔레그램, 계속 대기
+     - 비밀번호 거부 안내창 → 즉시 중단, 거부 기록 저장, HTS 종료, 텔레그램
+  8. 창 포커싱/최대화 → ESC 10회로 불필요한 팝업 닫기
   9. 데스크톱 세션 끊김 감지 시 2회까지 자동 재시도
 ```
+
+#### cert_guard.py — 공동인증서 로그인 보호 (mume·VR 공통)
+
+vr-agent에도 **똑같은 파일**이 있다. 한쪽을 고치면 다른 쪽에 그대로 복사하고 `scripts/check_shared.sh`로 확인한다.
+프로그램마다 다른 것은 알림 보내는 곳뿐이라 `set_notifier(함수)`로 넘긴다 (무매: 현재 작업 `JOB_NAME`의 봇 — morning·refresh_daily_return은 체결 봇, 나머지는 주문 봇).
+
+| 기능 | 내용 |
+|------|------|
+| 인증서 선택 | 조건에 맞는 인증서가 여러 개(갱신 후 예전 것이 남은 경우)면 목록에 보이는 날짜가 가장 늦은 것. 날짜를 못 읽으면 첫 번째 |
+| 비밀번호 거부 | 확인 버튼 뒤 '인증서 선택' 창이 남은 채 "비밀번호…틀림/불일치" 류 짧은 안내창이 뜨면 거부로 판단. 기록은 Credential Manager `meritz_cert_rejected/<사용자>` (예전 VR 기록 `vr_cert_rejected`도 읽음) — 같은 서버의 무매·VR이 함께 본다. 다른 비밀번호를 저장하면 자동으로 풀리고, 같은 비밀번호가 맞으면 콘솔 '잠금 풀기'(`/cert-unlock`) |
+| 만료공지 | 로그인 중 "인증서 만료공지" 창을 '확인'으로 닫고 `data/cert_status.json`에 사용자별 만료일 기록 + 로그인할 때마다 알림. 공지 없이 로그인하면(갱신 완료) 기록 삭제. 콘솔은 `/cert-status`로 읽어 접속 팝업·배너 표시 |
 
 #### hts_order_buy.py / hts_order_sell.py — 매수/매도 주문
 
@@ -627,6 +646,7 @@ TELEGRAM_CHAT_ID=
 ## 보안
 
 - **비밀번호 저장**: Windows Credential Manager(keyring). 파일/코드에 비밀번호 절대 저장 안 함.
+- **공동인증서 잠김 방지**: 증권사에서 거부된 공동인증서 비밀번호로는 다시 로그인하지 않음 (cert_guard).
 - **API 인증**: 모든 엔드포인트에 `X-Agent-Key` 헤더 필수. `hmac.compare_digest`로 타이밍 공격 방지.
 - **키 미설정 보호**: `HTS_AGENT_KEY`가 비어있으면 `/health` 제외 모든 요청 차단.
 - **테스트 모드**: `JOB_TEST_MODE=1` 시 실제 주문 대신 "닫기" 버튼 클릭. 주문 확인 팝업까지만 진행.

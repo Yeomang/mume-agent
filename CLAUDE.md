@@ -72,7 +72,9 @@ pip install -r requirements.txt
 | GET | `/status?job=<type>` | 작업 상태 조회 (never_run/running/success/error/stopped) |
 | GET | `/logs` | 로그 tail 조회 |
 | GET | `/processes` | HTS/Python 프로세스 상태 조회 |
-| GET | `/password-status?users=<csv>` | 비밀번호 설정 여부 확인 |
+| GET | `/password-status?users=<csv>` | 비밀번호 설정 여부 + 공동인증서 비밀번호 거부 여부(`cert_rejected`) |
+| POST | `/cert-unlock` | 공동인증서 비밀번호 거부 기록 해제 |
+| GET | `/cert-status` | 인증서 만료공지로 확인한 사용자별 만료 예정 (콘솔 팝업·배너) |
 | POST | `/update-passwords` | 비밀번호 저장 (Windows Credential Manager) |
 | POST | `/delete-passwords` | 비밀번호 삭제 |
 | POST | `/deploy` | 원격 배포 (GitHub Release zip 다운로드 & 적용) |
@@ -113,6 +115,7 @@ HTS 화면 → CSV 내보내기 → pandas 전처리 → Supabase 업데이트
 | 파일 | 역할 |
 |------|------|
 | `hts_login.py` | HTS 실행 + 공동인증서 로그인 |
+| `cert_guard.py` | 공동인증서 로그인 보호 — 인증서 선택(만료일 최신), 비밀번호 거부 차단, 만료공지 처리·알림 (**vr-agent와 같은 파일**) |
 | `hts_order_buy.py` | 해외주식 매수 주문 ([6100] 화면) |
 | `hts_order_sell.py` | 해외주식 매도 주문 ([6100] 화면) |
 | `hts_cancel_orders.py` | 미체결 주문 일괄 취소 ([6100] 미체결 탭) |
@@ -191,6 +194,13 @@ git push main → GitHub Actions → Release zip 생성 → webhook → mume-con
 
 ### 관련 프로젝트
 - `mume-console` (`/Users/pio/Documents/mume-console`) — 웹 콘솔 (FastAPI + Supabase + 프론트엔드)
+
+### mume·VR 공용 파일
+- 아래 파일은 두 저장소에 **똑같은 내용**으로 둔다. 한쪽을 고치면 다른 쪽에도 그대로 복사하고 `sh scripts/check_shared.sh`로 확인한 뒤 각각 커밋한다.
+  - `mume-agent/cert_guard.py` = `vr-agent/cert_guard.py`
+  - `mume-console/static/js/cert-notice.js` = `vr-console/static/cert-notice.js`
+  - `scripts/check_shared.sh` (네 저장소 모두)
+- 프로그램마다 다른 부분은 공용 파일 안에 분기로 넣지 말고 호출하는 쪽에서 넘긴다 (예: `cert_guard.set_notifier`, `loadCertNotice({api, passwordUrl})`).
 
 ### 콘솔 연동 수정 원칙
 - 작업 시 `mume-console`(`../mume-console/`) 코드와 그 `CLAUDE.md`도 함께 참고한다. (`.claude/settings.local.json`의 `additionalDirectories`에 등록됨)
