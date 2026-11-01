@@ -12,6 +12,7 @@
 
 | 날짜 | 내용 |
 |------|------|
+| 2026-11-01 | 배포 시점·버전 표시 — GitHub Actions가 배포 zip에 `agent_version.py`(SHA·커밋 시각·메시지)를 넣고 `/deploy-status`가 `version`으로 알려줌(수동 배포는 sha가 "manual"이라 콘솔 값으로는 알 수 없었음). `deploy_info.deployed_at`은 실제로 파일이 바뀐 배포 시각만('이미 최신' 확인은 `checked_at`) |
 | 2026-11-01 | 로그인 직후 순서 변경: 팝업 감시 시작 → 알려진 팝업이 닫힐 때까지 대기(`wait_known_popups_closed`) → ESC 10회 — CDD 모달이 떠 있는 동안 보낸 ESC가 공지사항 창([9501])에 닿지 않아 김경민 HTS에 공지 창이 계속 남던 문제 |
 | 2026-11-01 | 작업 실행 때 cmd 창이 뜨지 않게 — `/run`은 `CREATE_NEW_CONSOLE` → `CREATE_NO_WINDOW`(에이전트와 콘솔 분리는 유지, 창만 없음), 스케줄러(main_*.bat)로 실행돼 뜬 창은 `main_*.py` 시작 때 `hide_job_console()`로 숨김. CDD 팝업 '확인'은 글자 없는 버튼(win32 Button 4개·UIA 이름 없음, 서버 로그)이라 `KNOWN_POPUPS`에 `pick: "bottom"`(보이는 버튼 중 맨 아래)으로 지정, 고른 버튼 id·위치를 로그에 남김 |
 | 2026-11-01 | `hts_popups.click_button`: UIA 버튼 찾기 대기를 5초 → 1초로(그동안 팝업이 자동화를 막지 않게), 버튼을 못 찾으면 그 창의 win32·UIA 컨트롤 구조를 한 번 로그에 남김 — CDD 팝업 '확인'이 win32·UIA 이름으로 안 잡혀 창 닫기로 처리된 것 확인(2026-11-01 서버 로그) |
@@ -209,7 +210,7 @@ mume-agent/
 | GET | `/vr/install-status` | VR 설치 단계별 진행 |
 | GET/POST | `/vr/configure` | VR 알림(무매 봇/VR 전용 봇/끔) 변경 |
 | GET/POST | `/vr/passwords` | VR 비밀번호 등록 상태 조회·VR 전용 비밀번호 저장/초기화 (값은 돌려주지 않음) |
-| GET | `/deploy-status` | 현재 배포 버전 정보 + `db_mode`(token/anon) 조회 |
+| GET | `/deploy-status` | 마지막 배포 시각(`deployed_at` — 실제로 파일이 바뀐 때, `checked_at` — 마지막 확인) + 설치 버전(`version`: 배포 zip의 `agent_version.py`) + `db_mode`(token/anon) |
 
 **작업 실행 흐름 (`/run`):**
 

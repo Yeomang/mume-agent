@@ -10,6 +10,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Write version file (에이전트가 /deploy-status로 실제 설치 버전을 알려주도록)
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          log = lambda fmt: subprocess.check_output(["git", "log", "-1", f"--format={fmt}"]).decode("utf-8").strip()
+          with open("agent_version.py", "w", encoding="utf-8") as f:
+              f.write("# 배포 때 GitHub Actions가 만드는 파일 (저장소에 커밋하지 않음)\n")
+              f.write(f"SHA = {json.dumps(os.environ['SHA'])}\n")
+              f.write(f"COMMITTED_AT = {json.dumps(log('%cI'))}\n")
+              f.write(f"MESSAGE = {json.dumps(log('%s'), ensure_ascii=False)}\n")
+          PY
+          cat agent_version.py
+
       - name: Create release zip
         run: |
           zip -r mume-agent.zip . \

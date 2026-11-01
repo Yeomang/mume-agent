@@ -11,6 +11,7 @@ log.log
 # Local config
 automation_targets.json
 deploy_info.json
+agent_version.py   # 배포 때 GitHub Actions가 생성 (설치된 버전 표시용)
 
 # IDE
 .vscode/

@@ -924,12 +924,19 @@ def _execute_deploy(release_url: str, github_token: str = "") -> dict:
         if requirements_changed:
             pip_result = _run_pip_install()
 
-        # 5) 배포 정보 저장
-        deploy_info = {
-            "deployed_at": dt.datetime.now().isoformat(timespec="seconds"),
-            "updated_files": updated_files,
-            "release_url": release_url,
-        }
+        # 5) 배포 정보 저장 — deployed_at은 실제로 파일이 바뀐 배포 시각 ('이미 최신' 확인은 checked_at만 갱신)
+        now_iso = dt.datetime.now().isoformat(timespec="seconds")
+        prev = {}
+        try:
+            prev = json.loads(DEPLOY_INFO_FILE.read_text(encoding="utf-8")) if DEPLOY_INFO_FILE.exists() else {}
+        except Exception:
+            prev = {}
+        if updated_files or not prev.get("deployed_at"):
+            deploy_info = {"deployed_at": now_iso, "updated_files": updated_files, "release_url": release_url}
+        else:
+            deploy_info = {"deployed_at": prev["deployed_at"], "updated_files": prev.get("updated_files", []),
+                           "release_url": release_url}
+        deploy_info["checked_at"] = now_iso
         try:
             DEPLOY_INFO_FILE.write_text(
                 json.dumps(deploy_info, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -1097,16 +1104,41 @@ def reset_autologon():
     return {"message": "자동시작 설정이 초기화되었습니다. 서버 재시작 시 에이전트가 자동으로 켜지지 않습니다."}
 
 
+AGENT_VERSION_FILE = BASE_DIR / "agent_version.py"
+
+
+def _read_agent_version() -> Optional[Dict[str, str]]:
+    """설치된 코드 버전 — 배포 zip에 GitHub Actions가 넣는 agent_version.py (SHA·COMMITTED_AT·MESSAGE).
+    import하지 않고 읽는다 (에이전트가 켜진 채 배포로 파일이 바뀌어도 최신 값). 없으면 None (예전 배포·개발 PC)."""
+    import ast
+    try:
+        tree = ast.parse(AGENT_VERSION_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    values = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            try:
+                values[node.targets[0].id] = ast.literal_eval(node.value)
+            except Exception:
+                pass
+    if not values.get("SHA"):
+        return None
+    return {"sha": values["SHA"], "committed_at": values.get("COMMITTED_AT", ""), "message": values.get("MESSAGE", "")}
+
+
 @app.get("/deploy-status")
 def deploy_status():
+    version = _read_agent_version()
     if not DEPLOY_INFO_FILE.exists():
-        return {"deployed_at": None, "message": "배포 이력이 없습니다."}
+        return {"deployed_at": None, "message": "배포 이력이 없습니다.", "version": version}
     try:
         data = json.loads(DEPLOY_INFO_FILE.read_text(encoding="utf-8"))
         data["db_mode"] = _db_mode()
+        data["version"] = version
         return data
     except Exception:
-        return {"deployed_at": None, "message": "배포 정보를 읽을 수 없습니다.", "db_mode": _db_mode()}
+        return {"deployed_at": None, "message": "배포 정보를 읽을 수 없습니다.", "db_mode": _db_mode(), "version": version}
 
 
 def _db_mode() -> str:

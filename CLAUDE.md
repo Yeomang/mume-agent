@@ -78,7 +78,7 @@ pip install -r requirements.txt
 | POST | `/update-passwords` | 비밀번호 저장 (Windows Credential Manager) |
 | POST | `/delete-passwords` | 비밀번호 삭제 |
 | POST | `/deploy` | 원격 배포 (GitHub Release zip 다운로드 & 적용) |
-| GET | `/deploy-status` | 현재 배포 버전 정보 조회 |
+| GET | `/deploy-status` | 마지막 배포 시각(`deployed_at`) + 설치 버전(`version` — 배포 zip의 `agent_version.py`, Actions가 생성) |
 
 모든 엔드포인트는 `X-Agent-Key` 헤더로 인증. `/run`은 subprocess를 생성하며, `JOB_NAME`, `JOB_USER_ACCOUNTS`, `JOB_TEST_MODE`, `JOB_DATE_FROM`, `JOB_DATE_TO` 환경변수를 전달.
 
