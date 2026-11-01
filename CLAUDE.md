@@ -191,3 +191,7 @@ git push main → GitHub Actions → Release zip 생성 → webhook → mume-con
 
 ### 관련 프로젝트
 - `mume-console` (`/Users/pio/Documents/mume-console`) — 웹 콘솔 (FastAPI + Supabase + 프론트엔드)
+
+### 콘솔 연동 수정 원칙
+- 작업 시 `mume-console`(`../mume-console/`) 코드와 그 `CLAUDE.md`도 함께 참고한다. (`.claude/settings.local.json`의 `additionalDirectories`에 등록됨)
+- API 엔드포인트, 요청/응답 구조, 환경변수, Supabase 테이블 등 양쪽이 공유하는 부분을 수정할 때는 콘솔 측 호출/수신 코드를 먼저 확인한 뒤 수정 방향을 정한다.
