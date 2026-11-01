@@ -246,6 +246,19 @@ def start_watcher(user: str = ""):
     logging.info("HTS 팝업 감시 시작")
 
 
+def wait_known_popups_closed(timeout: float = 8) -> bool:
+    """알려진 팝업이 모두 닫힐 때까지 기다린다 (감시 스레드가 닫음). 로그인 직후 ESC 전에 호출 —
+    모달 팝업(CDD 등)이 떠 있으면 ESC가 공지사항 창([9501])에 닿지 않아 창이 남기 때문 (2026-11-01 서버)."""
+    import win32gui
+    end = time.time() + timeout
+    while time.time() < end:
+        if not any((h := win32gui.FindWindow(None, p["title"])) and win32gui.IsWindowVisible(h) for p in KNOWN_POPUPS):
+            return True
+        time.sleep(0.3)
+    logging.warning(f"알려진 팝업이 {timeout}초 안에 닫히지 않았습니다.")
+    return False
+
+
 # ───────────────────────────────────────────── 2) 실패 때 떠 있던 창 보고
 def _hts_pids() -> set[int]:
     try:

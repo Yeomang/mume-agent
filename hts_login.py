@@ -226,10 +226,13 @@ def hts_login(
             setup_window(hwnd)
             time.sleep(3)
 
-            # Esc 키를 10번 누르기
-            send_keys('{ESC 10}')
-            # 이후 작업 중 뜨는 알려진 팝업(CDD 재등록 안내 등) 자동 닫기 — 백그라운드 감시
+            # 알려진 팝업(CDD 재등록 안내 등) 감시 시작 — 작업 중에 떠도 자동으로 닫힘.
+            # 로그인 직후 떠 있는 모달 팝업을 먼저 닫아야 아래 ESC가 공지사항 창([9501])에 닿는다.
             hts_popups.start_watcher(selected_user)
+            hts_popups.wait_known_popups_closed()
+
+            # Esc 키를 10번 누르기 (공지사항 등 로그인 직후 창 정리)
+            send_keys('{ESC 10}')
             elapsed = time.time() - start_ts
             logging.info(f"HTS 로그인 완료 (총 소요: {elapsed:.2f}s)")
             return True
