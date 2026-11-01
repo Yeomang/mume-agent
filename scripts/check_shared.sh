@@ -15,6 +15,7 @@ check() {
   fi
 }
 check mume-agent/cert_guard.py vr-agent/cert_guard.py
+check mume-agent/hts_popups.py vr-agent/hts_popups.py
 check mume-console/static/js/cert-notice.js vr-console/static/cert-notice.js
 for r in vr-agent mume-console vr-console; do
   check mume-agent/scripts/check_shared.sh "$r/scripts/check_shared.sh"

@@ -34,7 +34,6 @@ CERT_ERROR_RE = re.compile(r"(비밀번호|암호).{0,30}(틀|일치하지|맞�
                            r"|(틀|잘못|올바르지).{0,30}(비밀번호|암호)")
 CERT_ERROR_MAX_LEN = 300
 DATE_RE = re.compile(r"(20\d{2})[-./](\d{1,2})[-./](\d{1,2})")
-BM_CLICK = 0x00F5
 NOTICE_GRACE_SEC = 4
 
 _notifier = None
@@ -230,38 +229,8 @@ def pick_certificate(cert_list, category: str, user: str):
 # ───────────────────────────────────────────── 4) 만료공지 팝업
 def _click_confirm(hwnd) -> bool:
     """'확인' 버튼만 누른다 ('갱신'을 누르면 로그인이 중단되고 갱신 화면으로 넘어감)."""
-    import win32gui
-    buttons = []
-
-    def child(h, _):
-        try:
-            if win32gui.GetClassName(h).lower() == "button" and win32gui.GetWindowText(h).replace("&", "").strip() == "확인":
-                buttons.append(h)
-        except Exception:
-            pass
-        return True
-    try:
-        win32gui.EnumChildWindows(hwnd, child, None)
-    except Exception:
-        pass
-    if buttons:
-        try:
-            win32gui.SetForegroundWindow(hwnd)
-        except Exception:
-            pass
-        win32gui.SendMessage(buttons[0], BM_CLICK, 0, 0)
-        time.sleep(1)
-        if not win32gui.IsWindowVisible(hwnd):
-            return True
-    try:   # win32 버튼으로 안 잡히는 창 — UIA로 '확인'을 찾아 클릭
-        from pywinauto import Application
-        w = Application(backend="uia").connect(handle=hwnd).window(handle=hwnd)
-        w.child_window(title="확인", control_type="Button").click_input()
-        time.sleep(1)
-        return not win32gui.IsWindowVisible(hwnd)
-    except Exception as e:
-        logging.error(f"인증서 만료공지 '확인' 버튼 클릭 실패: {e}")
-        return False
+    from hts_popups import click_button
+    return click_button(hwnd, "확인")
 
 
 def _handle_expiry_notice(hwnd, user: str) -> bool:

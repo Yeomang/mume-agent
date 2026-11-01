@@ -116,6 +116,7 @@ HTS 화면 → CSV 내보내기 → pandas 전처리 → Supabase 업데이트
 |------|------|
 | `hts_login.py` | HTS 실행 + 공동인증서 로그인 |
 | `cert_guard.py` | 공동인증서 로그인 보호 — 인증서 선택(만료일 최신), 비밀번호 거부 차단, 만료공지 처리·알림 (**vr-agent와 같은 파일**) |
+| `hts_popups.py` | HTS 팝업 감시 — 알려진 팝업(KNOWN_POPUPS) 자동 닫기 + GUI 작업 실패 때 떠 있던 창 보고 (**vr-agent와 같은 파일**) |
 | `hts_order_buy.py` | 해외주식 매수 주문 ([6100] 화면) |
 | `hts_order_sell.py` | 해외주식 매도 주문 ([6100] 화면) |
 | `hts_cancel_orders.py` | 미체결 주문 일괄 취소 ([6100] 미체결 탭) |
@@ -198,6 +199,7 @@ git push main → GitHub Actions → Release zip 생성 → webhook → mume-con
 ### mume·VR 공용 파일
 - 아래 파일은 두 저장소에 **똑같은 내용**으로 둔다. 한쪽을 고치면 다른 쪽에도 그대로 복사하고 `sh scripts/check_shared.sh`로 확인한 뒤 각각 커밋한다.
   - `mume-agent/cert_guard.py` = `vr-agent/cert_guard.py`
+  - `mume-agent/hts_popups.py` = `vr-agent/hts_popups.py` — 새로 만난 HTS 팝업은 `KNOWN_POPUPS`에 (정확한 제목, 누를 버튼) 한 줄 추가
   - `mume-console/static/js/cert-notice.js` = `vr-console/static/cert-notice.js`
   - `scripts/check_shared.sh` (네 저장소 모두)
 - 프로그램마다 다른 부분은 공용 파일 안에 분기로 넣지 말고 호출하는 쪽에서 넘긴다 (예: `cert_guard.set_notifier`, `loadCertNotice({api, passwordUrl})`).

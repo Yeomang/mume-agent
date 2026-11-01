@@ -172,6 +172,8 @@ def with_desktop_retry(func):
     1. ensure_active_desktop()으로 데스크톱 복원
     2. 함수 전체를 처음부터 재시도 (최대 1회)
 
+    그 외 예외로 실패하면 그때 떠 있던 HTS 창을 보고한 뒤 예외를 그대로 올린다 (hts_popups.report_open_windows).
+
     사용법:
         @with_desktop_retry
         def hts_order_buy(selected_user, account_index, ...):
@@ -191,8 +193,21 @@ def with_desktop_retry(func):
                     return func(*args, **kwargs)
                 else:
                     logging.error(f"[{func.__name__}] 데스크톱 복원 실패.")
+            _report_hts_windows(func.__name__)
+            raise
+        except Exception:
+            _report_hts_windows(func.__name__)
             raise
     return wrapper
+
+
+def _report_hts_windows(context):
+    """GUI 작업 실패 때 떠 있던 HTS 창(모르는 팝업 확인용)을 로그·텔레그램으로 남긴다."""
+    try:
+        import hts_popups
+        hts_popups.report_open_windows(context)
+    except Exception as e:
+        logging.warning(f"HTS 창 보고 실패: {e}")
 
 
 if _IS_WINDOWS:

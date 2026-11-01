@@ -12,6 +12,7 @@ import os
 from secrets_manager import get_cert_password
 from config import Config
 import cert_guard
+import hts_popups
 
 # 상수 정의
 DEFAULT_TIMEOUT = 60
@@ -157,6 +158,7 @@ def hts_login(
     )
 
     cert_guard.set_notifier(_job_notifier())
+    hts_popups.set_notifier(_job_notifier())
     try:
         password = get_cert_password(selected_user)
     except Exception as e:
@@ -226,6 +228,8 @@ def hts_login(
 
             # Esc 키를 10번 누르기
             send_keys('{ESC 10}')
+            # 이후 작업 중 뜨는 알려진 팝업(CDD 재등록 안내 등) 자동 닫기 — 백그라운드 감시
+            hts_popups.start_watcher(selected_user)
             elapsed = time.time() - start_ts
             logging.info(f"HTS 로그인 완료 (총 소요: {elapsed:.2f}s)")
             return True
