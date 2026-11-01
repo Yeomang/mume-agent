@@ -30,8 +30,9 @@ import json
 import csv
 import io
 
-from utils import set_log_context, install_log_context_filter, send_telegram_message
+from utils import set_log_context, install_log_context_filter, send_telegram_message, hide_job_console
 install_log_context_filter()
+hide_job_console()   # 스케줄러 실행 때 뜬 cmd 창 숨기기
 from hts_login import hts_login
 from hts_stock_balance_save_to_csv import save_data_stock_balance
 from stock_balance_data_preprocessing import stock_balance_data_preprocessing

@@ -36,8 +36,9 @@ sys.excepthook = log_uncaught_exceptions
 import os
 import json
 
-from utils import set_log_context, install_log_context_filter, kill_window_by_title, to_yyyymmdd
+from utils import set_log_context, install_log_context_filter, kill_window_by_title, to_yyyymmdd, hide_job_console
 install_log_context_filter()
+hide_job_console()   # 스케줄러 실행 때 뜬 cmd 창 숨기기
 from hts_login import hts_login
 from hts_daily_return_save_to_csv import save_data_daily_return
 from daily_return_update_supabase import sync_daily_return_to_db

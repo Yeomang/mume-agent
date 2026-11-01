@@ -357,7 +357,8 @@ def run_job(
             [sys.executable, str(script_path)],
             cwd=str(BASE_DIR),
             env=env,
-            creationflags=subprocess.CREATE_NEW_CONSOLE,
+            # 에이전트와 콘솔을 분리하되(작업 오류가 에이전트에 영향 X) 창은 띄우지 않음 — 진행은 콘솔 로그에서 확인
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
         LAST_STATUS[job] = {"status": "running", "finished_at": None, "returncode": None}
         pid = CURRENT_PROC[job].pid if CURRENT_PROC[job] else "-"

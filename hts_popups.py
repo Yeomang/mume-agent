@@ -18,11 +18,13 @@ import threading
 import time
 
 # title: 창 제목(정확히 일치) / button: 누를 버튼 글자 / allow_close: 버튼을 못 누르면 창 닫기(X)로 대신해도 되는지
+# pick: 버튼에 글자가 없을 때(직접 그린 버튼) 위치로 고르기 — "bottom": 보이는 버튼 중 가장 아래(같으면 가장 넓은 것)
 # notice: 알림 문구 ({user} 자리에 로그인 사용자) — 없으면 알림 없이 로그만
 KNOWN_POPUPS = [
     {
         "title": "CDD 재이행 도래 고객 안내 팝업",
         "button": "확인",
+        "pick": "bottom",   # 버튼 4개 모두 글자 없음(AfxWnd·Button, 2026-11-01 서버 로그) — '확인'은 맨 아래 가운데
         "allow_close": True,
         "notice": ("🪪 고객확인(CDD) 재등록 안내 — {user}\n"
                    "메리츠 HTS에 고객확인 재등록 안내가 떠서 자동으로 닫았습니다. "
@@ -64,8 +66,9 @@ def _plain(text: str) -> str:
 
 
 # ───────────────────────────────────────────── 버튼 누르기
-def click_button(hwnd, text: str, allow_close: bool = False) -> bool:
-    """창의 버튼(글자 text)을 누른다 — win32 BM_CLICK → UIA Invoke → (허용 시) 창 닫기. 창이 사라지면 True."""
+def click_button(hwnd, text: str, allow_close: bool = False, pick: str | None = None) -> bool:
+    """창의 버튼(글자 text)을 누른다 — win32 BM_CLICK → (pick 지정 시) 위치로 고른 버튼 → UIA Invoke
+    → (허용 시) 창 닫기. 창이 사라지면 True."""
     import win32gui
 
     def gone(wait=0.7):
@@ -100,7 +103,9 @@ def click_button(hwnd, text: str, allow_close: bool = False) -> bool:
             logging.info(f"'{title}' '{text}' 처리: win32 버튼 클릭(창 앞으로 가져온 뒤)으로 닫힘")
             return True
     else:
-        logging.info(f"'{title}' 창에 win32 '{text}' 버튼 없음 — UIA로 찾기")
+        logging.info(f"'{title}' 창에 win32 '{text}' 버튼 없음")
+        if pick and _click_by_position(hwnd, title, text, pick, gone):
+            return True
     try:   # 자체 그린 버튼 — UIA Invoke (마우스 이동 없음)
         try:
             import pythoncom
@@ -126,6 +131,46 @@ def click_button(hwnd, text: str, allow_close: bool = False) -> bool:
             logging.info(f"'{title}' '{text}' 처리: 버튼을 못 찾아 창 닫기(X)로 닫힘")
             return True
     logging.error(f"'{title}' 창의 '{text}' 버튼을 누르지 못했습니다.")
+    return False
+
+
+def _click_by_position(hwnd, title: str, text: str, pick: str, gone) -> bool:
+    """글자 없는 버튼 중 위치로 골라 BM_CLICK (pick="bottom": 가장 아래, 같으면 가장 넓은 것)."""
+    import win32gui
+    cands = []
+
+    def child(h, _):
+        try:
+            if win32gui.GetClassName(h).lower() == "button" and win32gui.IsWindowVisible(h):
+                l, t, r, b = win32gui.GetWindowRect(h)
+                cands.append((b, r - l, h, (l, t, r, b)))
+        except Exception:
+            pass
+        return True
+    try:
+        win32gui.EnumChildWindows(hwnd, child, None)
+    except Exception:
+        pass
+    if pick != "bottom" or not cands:
+        return False
+    _, _, h, rect = max(cands)
+    try:
+        cid = win32gui.GetDlgCtrlID(h)
+    except Exception:
+        cid = "?"
+    logging.info(f"'{title}' 보이는 버튼 {len(cands)}개 중 맨 아래 버튼을 '{text}'로 클릭 (id={cid}, 위치={rect})")
+    win32gui.SendMessage(h, BM_CLICK, 0, 0)
+    if gone():
+        logging.info(f"'{title}' '{text}' 처리: 위치로 고른 버튼 클릭으로 닫힘 (id={cid})")
+        return True
+    try:
+        win32gui.SetForegroundWindow(hwnd)
+    except Exception:
+        pass
+    win32gui.SendMessage(h, BM_CLICK, 0, 0)
+    if gone():
+        logging.info(f"'{title}' '{text}' 처리: 위치로 고른 버튼 클릭(창 앞으로 가져온 뒤)으로 닫힘 (id={cid})")
+        return True
     return False
 
 
@@ -172,7 +217,7 @@ def dismiss_known_popups() -> int:
         if not (hwnd and win32gui.IsWindowVisible(hwnd)):
             continue
         logging.warning(f"알려진 HTS 팝업 감지: '{p['title']}' → '{p['button']}' 클릭")
-        if click_button(hwnd, p["button"], p.get("allow_close", False)):
+        if click_button(hwnd, p["button"], p.get("allow_close", False), p.get("pick")):
             closed += 1
         key = (_user, p["title"], dt.date.today().isoformat())
         if p.get("notice") and key not in _notified:

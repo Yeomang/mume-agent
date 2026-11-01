@@ -55,6 +55,20 @@ def install_log_context_filter():
         root.addFilter(_LogContextFilter())
 
 
+def hide_job_console():
+    """작업 콘솔 창 숨기기 — 스케줄러(main_*.bat의 start)로 실행돼 cmd 창이 떴을 때. main_*.py 시작 때 호출.
+    콘솔 자체는 남아 있어 os.system 등 하위 명령도 새 창을 띄우지 않는다. 에이전트(/run)는 처음부터 창 없이 실행."""
+    if not _IS_WINDOWS:
+        return
+    try:
+        import ctypes
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 0)   # SW_HIDE
+    except Exception:
+        pass
+
+
 # ─────────────────────────────────────
 # RDP 세션 유지 (GUI 자동화에 필수)
 # ─────────────────────────────────────

@@ -32,8 +32,9 @@ import json
 
 import httpx
 
-from utils import set_log_context, install_log_context_filter
+from utils import set_log_context, install_log_context_filter, hide_job_console
 install_log_context_filter()
+hide_job_console()   # 스케줄러 실행 때 뜬 cmd 창 숨기기
 from hts_login import hts_login
 from hts_cancel_orders import hts_cancel_orders
 from utils import kill_window_by_title, send_telegram_message
