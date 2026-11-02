@@ -116,6 +116,7 @@ def on_startup():
     _agent_logger.info("═══ HTS Agent 서버 시작 (port 9000) ═══")
     threading.Thread(target=_job_log_monitor_loop, daemon=True, name="job-log-monitor").start()
     threading.Thread(target=_pending_deploy_monitor_loop, daemon=True, name="pending-deploy-monitor").start()
+    threading.Thread(target=_listen_watchdog_loop, daemon=True, name="listen-watchdog").start()
     try:  # VR 감시 — 서버에 VR 에이전트가 설치돼 있으면 꺼짐/멈춤 시 VR만 다시 켬 (mume 동작과 무관)
         from vr_installer import start_vr_watchdog
         start_vr_watchdog()
@@ -823,6 +824,31 @@ def _pending_deploy_monitor_loop() -> None:
             _apply_pending_deploy_if_idle()
         except Exception as e:
             _agent_logger.error(f"대기 배포 모니터 오류: {e}")
+        time.sleep(30)
+
+
+def _listen_watchdog_loop() -> None:
+    """포트 9000이 접속을 받는지 30초마다 확인해, 3번 연속 안 되면 프로세스를 끝낸다 (hts_agent.bat가 다시 켬).
+
+    Windows asyncio(Proactor)는 접속 수락 중 네트워크 오류(WinError 64 등)가 한 번 나면 리슨 소켓을 닫아 버린다.
+    프로세스는 살아 있어 bat가 재시작하지 않고, 콘솔에는 계속 오프라인으로 보인다.
+    """
+    import socket
+    import time
+    time.sleep(60)  # 서버가 리슨을 시작할 때까지 대기
+    fails = 0
+    while True:
+        try:
+            with socket.create_connection(("127.0.0.1", 9000), timeout=5):
+                pass
+            fails = 0
+        except OSError as e:
+            fails += 1
+            _agent_logger.warning(f"포트 9000 접속 확인 실패 {fails}/3: {e}")
+            if fails >= 3:
+                _agent_logger.error("포트 9000이 접속을 받지 않음 → 에이전트 재시작 (hts_agent.bat 래퍼가 자동 재실행)")
+                write_log("LISTEN_RESTART", "agent", "포트 9000 리슨 중단 감지 → 에이전트 재시작")
+                os._exit(0)
         time.sleep(30)
 
 
