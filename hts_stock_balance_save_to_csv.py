@@ -1,4 +1,4 @@
-from utils import setup_window, get_window_handle, find_control_by_criteria, set_focus_and_type, wait_for_window, block_input, copy_to_clipboard, with_desktop_retry
+from utils import setup_window, get_window_handle, find_control_by_criteria, set_focus_and_type, block_input, with_desktop_retry, close_save_dialogs, save_csv_via_dialog
 from config import Config
 from pywinauto import Application
 import time
@@ -28,6 +28,7 @@ def _export_table_to_csv(
     export_menu_index: 우클릭 메뉴에서 '파일로 보내기' 항목의 순번(1-based).
                       잔고 탭 테이블은 9, 예수금 탭 외화예수금 테이블은 6 등 테이블마다 다르다.
     """
+    close_save_dialogs(f"{label} 저장 전 — 남아 있던 창")
     rect = table_pane.rectangle()
     table_width = rect.right - rect.left
     x = int(rect.left + table_width / 2)
@@ -44,14 +45,8 @@ def _export_table_to_csv(
     logging.info("'Csv로 저장' 버튼을 클릭하였습니다.")
     time.sleep(1)
 
-    dialog_found = wait_for_window("다른 이름으로 저장", main_window, "다른 이름으로 저장", "Window", timeout=10)
-    if dialog_found:
-        copy_to_clipboard(str(save_path))
-        send_keys("%n")
-        send_keys("^v{ENTER}")
-        logging.info(f"[정상 저장] {save_path}")
-        time.sleep(2)
-    else:
+    # 창이 떴는데 저장이 안 되면 save_csv_via_dialog가 예외를 낸다 (빈 결과로 착각하지 않게)
+    if not save_csv_via_dialog(save_path, label):
         logging.warning(f"[저장 실패] '다른 이름으로 저장' 대화상자가 열리지 않음 ({label})")
 
 

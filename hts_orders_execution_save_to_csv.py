@@ -1,4 +1,4 @@
-from utils import setup_window, get_window_handle, find_control_by_criteria, set_focus_and_type, wait_for_window, block_input, copy_to_clipboard, with_desktop_retry
+from utils import setup_window, get_window_handle, find_control_by_criteria, set_focus_and_type, block_input, with_desktop_retry, close_save_dialogs, save_csv_via_dialog
 from config import Config
 from pywinauto import Application
 import time
@@ -96,6 +96,7 @@ def save_data_order_execution(selected_user, account_index, inquiry_start_date=N
     table_pane = find_control_by_criteria(main_window, "Pane", automation_id=AUTO_ID_TABLE_INQUIRY, delay=2, retries=5)
     if not table_pane:
         raise Exception("주문체결내역 데이터 테이블을 찾을 수 없습니다.")
+    close_save_dialogs("주문체결내역 저장 전 — 남아 있던 창")
     rect = table_pane.rectangle()
 
     # 테이블의 첫 번째의 행 좌표 계산(대충) 후 우클릭
@@ -117,9 +118,6 @@ def save_data_order_execution(selected_user, account_index, inquiry_start_date=N
     logging.info(f"'Csv로 저장' 버튼을 클릭하였습니다.")
     time.sleep(1)
 
-    # "다른 이름으로 저장" 대화상자 뜰 때까지 기다리기
-    wait_for_window("다른 이름으로 저장", main_window, "다른 이름으로 저장", "Window", timeout=10)
-    
     # 현재 실행 중인 .py 파일의 디렉토리 경로 가져오기
     current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -130,14 +128,10 @@ def save_data_order_execution(selected_user, account_index, inquiry_start_date=N
     # 파일경로 Unicode 적용
     save_path = Path(current_dir) / "data" / "all_order_execution_raw" / f"all_order_execution_raw_{selected_user}_{account_index}_{inquiry_start_date}-{inquiry_end_date}.csv"
 
-    # 클립보드에 UTF-16LE로 복사
-    copy_to_clipboard(str(save_path))
-
-    # "다른 이름으로 저장" 대화상자에서 'Alt + N'으로 파일 이름 입력 필드 선택
-    send_keys("%n")
-
-    # 클립보드에 UTF-16LE로 복사된 파일경로 붙여넣고 Enter 입력
-    send_keys("^v{ENTER}")
+    # "다른 이름으로 저장" 창에 경로를 넣어 저장 + 실제로 저장됐는지 확인 (예전 파일은 먼저 지움 —
+    # 같은 날짜 범위 파일을 시간외 작업이 먼저 만들어 두므로, 저장이 실패해도 그 파일을 이번 결과로 읽던 문제)
+    if not save_csv_via_dialog(save_path, "주문체결내역"):
+        raise Exception("주문체결내역 '다른 이름으로 저장' 창이 뜨지 않았습니다.")
 
     logging.info(f"csv 데이터를 아래 경로에 저장하였습니다.")
     logging.info(f"저장경로 : {str(save_path)}")

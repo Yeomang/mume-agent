@@ -4,7 +4,7 @@
 
 웹 콘솔([mume-console](../mume-console))에서 HTTP API로 제어하며, 스케줄 또는 수동으로 작업을 실행한다.
 
-> **최종 업데이트:** 2026-11-02
+> **최종 업데이트:** 2026-11-04
 
 ---
 
@@ -12,6 +12,7 @@
 
 | 날짜 | 내용 |
 |------|------|
+| 2026-11-04 | CSV 저장·컨트롤 탐색·아침 작업 보강 — ① `find_control_by_criteria`가 컨트롤이 없으면 다시 찾지 않고 바로 None을 돌려주던 버그 수정(`retries`대로 재시도, `silent`는 그대로 1회) ② CSV 저장을 `save_csv_via_dialog`로 통일: 예전 파일 삭제 → 저장 창 닫힘·새 파일 생성 확인 → 실패 시 1회 재입력, 그래도 안 되면 저장 창을 닫고 예외 (예전 파일을 이번 결과로 읽거나 남은 저장 창이 다음 화면을 막던 문제 — 11/04 홍승표 4번 [6104] 실패) ③ 저장 전 남아 있던 '다른 이름으로 저장' 창 닫기 (HTS 프로세스 창만 — 메모장 등 다른 프로그램 창은 건드리지 않음) ④ 아침 작업: 계좌 하나가 실패해도 HTS 재로그인 후 다음 계좌 진행, 끝나면 실패 계좌 텔레그램 알림 + 작업은 오류로 종료 |
 | 2026-11-02 | hts_agent: 포트 9000 리슨 감시 추가 — Windows asyncio가 접속 수락 오류(WinError 64)로 리슨 소켓을 닫아 프로세스는 살아 있는데 오프라인이 되던 문제, 3번 연속 접속 실패 시 프로세스 종료 → bat가 재시작 |
 | 2026-11-01 | 배포 시점·버전 표시 — GitHub Actions가 배포 zip에 `agent_version.py`(SHA·커밋 시각·메시지)를 넣고 `/deploy-status`가 `version`으로 알려줌(수동 배포는 sha가 "manual"이라 콘솔 값으로는 알 수 없었음). `deploy_info.deployed_at`은 실제로 파일이 바뀐 배포 시각만('이미 최신' 확인은 `checked_at`) |
 | 2026-11-01 | 로그인 직후 순서 변경: 팝업 감시 시작 → 알려진 팝업이 닫힐 때까지 대기(`wait_known_popups_closed`) → ESC 10회 — CDD 모달이 떠 있는 동안 보낸 ESC가 공지사항 창([9501])에 닿지 않아 김경민 HTS에 공지 창이 계속 남던 문제 |
@@ -460,7 +461,8 @@ Supabase `user_accounts` 테이블에서 `is_automation_target=true`인 계좌�
 | GUI 입력 잠금/해제 | `block_input(True/False)` |
 | HTS 창 핸들 찾기 | `get_window_handle(title)` |
 | HTS 창 포커싱/최대화 | `setup_window(hwnd)` |
-| UI 컨트롤 탐색 | `find_control_by_criteria(window, type, automation_id, title)` |
+| UI 컨트롤 탐색 | `find_control_by_criteria(window, type, automation_id, title)` — 없으면 `retries`번까지 다시 찾음 (`silent=True`는 '없어도 되는' 확인용이라 1회) |
+| CSV 저장 ('다른 이름으로 저장' 창) | `save_csv_via_dialog(path, label)` — 예전 파일 삭제 → 경로 입력 → 저장 창 닫힘·새 파일 확인 (창이 안 뜨면 False, 떴는데 저장 안 되면 창 닫고 예외) / `close_save_dialogs(reason)` — 남아 있던 저장 창 닫기 |
 | 텍스트 입력 | `set_focus_and_type(control, text)` |
 | HTS 프로세스 종료 | `kill_window_by_title(title)` |
 | 텔레그램 전송 | `send_telegram_message(token, chat_id, text)` |
@@ -500,15 +502,19 @@ Supabase `user_accounts` 테이블에서 `is_automation_target=true`인 계좌�
 1. automation_target_store → 자동화 대상 조회
 2. 사용자별 루프:
    a. hts_login() — HTS 로그인
-   b. 계좌별 루프:
+   b. 계좌별 루프 (_run_account):
       i.  [6114] 체결내역 CSV 저장 (지정 기간 또는 기본 기간)
       ii. 체결내역 CSV 전처리 (이중 헤더 정규화, 중복 제거)
       iii. [6104] 보유잔고 CSV 저장 → 전처리
       iv. 외화예수금 + 보유잔고 → Supabase 동기화
-      v.  order_execution_update_supabase() — 체결 데이터 cycle_trades INSERT
+      v.  [2363] 일별 계좌수익률 CSV 저장 → Supabase 동기화
+      vi. order_execution_update_supabase() — 체결 데이터 cycle_trades INSERT
                                            → 콘솔 /recompute 트리거
+      ※ 계좌 하나가 실패하면 기록해 두고 HTS 재로그인 후 다음 계좌 진행
+        (재로그인 실패 시 그 사용자의 남은 계좌는 건너뜀, 데스크톱 세션 끊김은 즉시 중단)
    c. kill_window_by_title() — HTS 종료
 3. 2주 이상 된 order_status 레코드 자동 정리 (수동 실행 시 스킵)
+4. 실패한 계좌가 있으면 텔레그램(체결 알림 봇)으로 알리고 작업을 오류로 종료 (콘솔에 '오류' 표시)
 ```
 
 ### 시간외 작업 (Aftermarket Job)

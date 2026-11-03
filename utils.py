@@ -377,7 +377,10 @@ def block_input(state=True):
 
 
 def find_control_by_criteria(parent, control_type, automation_id=None, title=None, index=0, retries=3, delay=1, silent=False):
-    """특정 기준에 따라 하위 컨트롤을 찾습니다. silent=True이면 못 찾아도 WARNING 생략."""
+    """특정 기준에 따라 하위 컨트롤을 찾습니다.
+    delay초 기다린 뒤 찾고, 못 찾으면 retries번까지 다시 찾는다 (사이 간격은 delay, 최소 1초 — 화면이 늦게 뜨는 경우 대비).
+    silent=True는 '없을 수도 있는' 컨트롤 확인용 — 없으면 다시 찾지 않고 바로 None, WARNING도 생략 (탐색 오류만 다시 시도).
+    """
     time.sleep(delay)
     for attempt in range(retries):
         try:
@@ -388,14 +391,16 @@ def find_control_by_criteria(parent, control_type, automation_id=None, title=Non
                 and (title is None or ctrl.element_info.name == title)
             ]
             if len(controls) > index:
+                if attempt:
+                    logging.info(f"컨트롤 찾음 ({attempt + 1}번째 시도): type='{control_type}', id='{automation_id}', title='{title}'")
                 return controls[index]
-            else:
+            if silent:
                 return None
         except Exception as e:
             if not silent:
                 logging.warning(f"컨트롤 탐색 재시도 ({attempt+1}/{retries}): {e}")
-            if attempt < retries - 1:
-                time.sleep(1)
+        if attempt < retries - 1:
+            time.sleep(max(delay, 1))
     if not silent:
         logging.warning(f"컨트롤 탐색 실패: type='{control_type}', id='{automation_id}', title='{title}'")
     return None
@@ -476,8 +481,157 @@ def wait_for_window(message, parent, title, control_type, timeout=120):
     if timeout > 5:
         logging.warning(f"'{message}' 창이 {timeout}초 내에 나타나지 않았습니다.")
     return None  # 창을 찾지 못한 경우
-        
-        
+
+
+# ─────────────────────────────────────
+# CSV 저장 ('파일로 보내기' → 'Csv로 저장' → '다른 이름으로 저장' 창)
+# ─────────────────────────────────────
+SAVE_DIALOG_TITLE = "다른 이름으로 저장"
+
+
+def _hts_pids() -> set:
+    """HTS 프로세스 ID — 다른 프로그램(메모장 등)의 저장 창을 건드리지 않으려고. 못 구하면 빈 집합(제목만으로 찾음)."""
+    try:
+        import hts_popups
+        return hts_popups._hts_pids()
+    except Exception:
+        return set()
+
+
+def _save_dialogs(pids: set) -> list:
+    """HTS가 띄운, 보이는 '다른 이름으로 저장' 창 핸들 (제목에 포함 — 같은 제목의 안내창·덮어쓰기 확인창 포함)."""
+    found = []
+
+    def cb(h, _):
+        try:
+            if win32gui.IsWindowVisible(h) and SAVE_DIALOG_TITLE in win32gui.GetWindowText(h):
+                if not pids or win32process.GetWindowThreadProcessId(h)[1] in pids:
+                    found.append(h)
+        except Exception:
+            pass
+        return True
+    win32gui.EnumWindows(cb, None)
+    return found
+
+
+def _is_open(hwnd) -> bool:
+    try:
+        return bool(win32gui.IsWindow(hwnd) and win32gui.IsWindowVisible(hwnd))
+    except Exception:
+        return False
+
+
+def _save_dialog_state(hwnd) -> str:
+    """로그용 — 창 문구 + 입력 칸 값 (파일 이름 칸에 경로가 들어갔는지 보려고)."""
+    from ctypes import wintypes
+    from cert_guard import window_text
+    # 다른 프로세스의 입력 칸은 GetWindowText로 못 읽어 WM_GETTEXT를 보낸다 (응답 없으면 1초 뒤 포기)
+    send_timeout = ctypes.WinDLL("user32").SendMessageTimeoutW
+    send_timeout.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
+                             wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t)]
+    send_timeout.restype = wintypes.LPARAM
+    edits = []
+
+    def cb(h, _):
+        try:
+            if win32gui.GetClassName(h).lower() == "edit":
+                buf = ctypes.create_unicode_buffer(1024)
+                res = ctypes.c_size_t()
+                send_timeout(h, 0x000D, 1024, ctypes.addressof(buf), 0x0002, 1000, ctypes.byref(res))
+                edits.append(buf.value)
+        except Exception:
+            pass
+        return True
+    try:
+        win32gui.EnumChildWindows(hwnd, cb, None)
+    except Exception:
+        pass
+    return f"{window_text(hwnd)[:200]} | 입력 칸: {edits}"
+
+
+def close_save_dialogs(reason: str) -> None:
+    """떠 있는 '다른 이름으로 저장' 창을 닫는다 (취소와 같음). 남아 있으면 다음 화면의 키 입력을 가로채거나 막는다."""
+    pids = _hts_pids()
+    for _ in range(3):   # 저장 창 위에 같은 제목의 안내창이 겹쳐 있을 수 있어 몇 번 반복
+        hwnds = _save_dialogs(pids)
+        if not hwnds:
+            return
+        for h in hwnds:
+            logging.warning(f"'{SAVE_DIALOG_TITLE}' 창 닫기 ({reason}): {_save_dialog_state(h)}")
+            try:
+                win32gui.PostMessage(h, win32con.WM_CLOSE, 0, 0)
+            except Exception as e:
+                logging.warning(f"'{SAVE_DIALOG_TITLE}' 창 닫기 실패: {e}")
+        time.sleep(1)
+    if _save_dialogs(pids):
+        logging.error(f"'{SAVE_DIALOG_TITLE}' 창이 닫히지 않았습니다 ({reason})")
+
+
+def _wait_file_saved(hwnd, path: Path, timeout: float) -> bool:
+    """저장 창이 닫히고 파일이 생겨 크기가 더 변하지 않으면 True."""
+    end = time.time() + timeout
+    last_size = None
+    while time.time() < end:
+        if not _is_open(hwnd) and path.exists():
+            size = path.stat().st_size
+            if size == last_size:
+                return True
+            last_size = size
+        time.sleep(0.5)
+    return False
+
+
+def save_csv_via_dialog(save_path, label: str, timeout: float = 10) -> bool:
+    """'Csv로 저장'을 누른 직후 호출 — '다른 이름으로 저장' 창에 경로를 넣어 저장하고, 실제로 저장됐는지 확인한다.
+    - 먼저 예전 파일을 지운다 (이번 저장이 실패했는데 예전 파일을 이번 결과로 읽는 일이 없게).
+    - 창이 timeout초 안에 안 뜨면 False (표가 비면 HTS가 메뉴를 안 띄우기도 함 — 정상인지는 호출부가 판단).
+    - 창은 떴는데 파일이 안 생기면 한 번 더 입력하고, 그래도 안 되면 창을 닫고 예외.
+    """
+    save_path = Path(save_path)
+    save_path.unlink(missing_ok=True)
+
+    logging.info(f"'{SAVE_DIALOG_TITLE}' 창 대기 중 (최대 {timeout}초)...")
+    pids = _hts_pids()
+    hwnd = None
+    end = time.time() + timeout
+    while time.time() < end:
+        hwnds = _save_dialogs(pids)
+        if hwnds:
+            hwnd = hwnds[0]
+            break
+        time.sleep(0.5)
+    if not hwnd:
+        # 정상일 수도 있어(빈 표) INFO — 실패인지는 호출부가 판단해 남긴다
+        logging.info(f"[{label}] '{SAVE_DIALOG_TITLE}' 창이 {timeout}초 안에 뜨지 않았습니다.")
+        return False
+    time.sleep(0.5)   # 창이 막 뜬 직후엔 키가 파일 이름 칸에 안 들어갈 수 있음
+
+    for attempt in (1, 2):
+        if attempt == 2:   # 첫 시도는 예전과 똑같이 키만 보낸다 — 다시 넣을 때만 저장 창을 앞으로
+            try:
+                if win32gui.GetForegroundWindow() != hwnd:
+                    win32gui.SetForegroundWindow(hwnd)
+                    time.sleep(0.3)
+            except Exception as e:
+                logging.info(f"[{label}] 저장 창 앞으로 가져오기 실패 (그대로 진행): {e}")
+        copy_to_clipboard(str(save_path))
+        send_keys("%n")            # 파일 이름 칸으로 이동
+        send_keys("^v{ENTER}")     # 경로 붙여넣고 저장
+        if _wait_file_saved(hwnd, save_path, timeout=10):
+            logging.info(f"[정상 저장] {save_path}")
+            return True
+        still_open = _is_open(hwnd)
+        logging.warning(
+            f"[{label}] 저장 확인 실패 ({attempt}/2) — 저장 창 {'열려 있음' if still_open else '닫힘'}, 파일 없음"
+            + (f" | {_save_dialog_state(hwnd)}" if still_open else "")
+        )
+        if not still_open:
+            break   # 창이 닫혔는데 파일이 없으면 다시 넣을 곳이 없음
+
+    close_save_dialogs(f"{label} 저장 실패")
+    raise Exception(f"[{label}] CSV 저장 실패 — '{SAVE_DIALOG_TITLE}' 창은 떴지만 파일이 생기지 않았습니다: {save_path}")
+
+
 
 def _handle_password_dialog(main_window, password):
     """

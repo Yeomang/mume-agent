@@ -1,4 +1,4 @@
-from utils import setup_window, get_window_handle, find_control_by_criteria, set_focus_and_type, wait_for_window, block_input, copy_to_clipboard, _handle_password_dialog
+from utils import setup_window, get_window_handle, find_control_by_criteria, set_focus_and_type, block_input, _handle_password_dialog, close_save_dialogs, save_csv_via_dialog
 from secrets_manager import get_account_password
 from config import Config
 from pywinauto import Application
@@ -80,6 +80,7 @@ def save_orders_history(selected_user, account_index):
     table_pane = find_control_by_criteria(main_window, "Pane", automation_id=AUTO_ID_TABLE_ORDER, index=CTRL_INDEX_TABLE_ORDER, delay=2, retries=5)
     if not table_pane:
         raise Exception("주문체결 데이터 테이블을 찾을 수 없습니다.")
+    close_save_dialogs("주문내역 저장 전 — 남아 있던 창")
     rect = table_pane.rectangle()
 
     # 테이블의 첫 번째의 행 좌표 계산(대충) 후 우클릭
@@ -101,9 +102,6 @@ def save_orders_history(selected_user, account_index):
     logging.info(f"'Csv로 저장' 버튼을 클릭하였습니다.")
     time.sleep(1)
 
-    # "다른 이름으로 저장" 대화상자 뜰 때까지 기다리기
-    wait_for_window("다른 이름으로 저장", main_window, "다른 이름으로 저장", "Window", timeout=10)
-
     # 현재 실행 중인 .py 파일의 디렉토리 경로 가져오기
     current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -118,17 +116,16 @@ def save_orders_history(selected_user, account_index):
     # 텔레그램에 잘못 표시하는 일이 없도록 함 (get_unfilled_tickers_dict와 동일한 이유)
     save_path.unlink(missing_ok=True)
 
-    # 클립보드에 UTF-16LE로 복사
-    copy_to_clipboard(str(save_path))
-
-    # "다른 이름으로 저장" 대화상자에서 'Alt + N'으로 파일 이름 입력 필드 선택
-    send_keys("%n")
-
-    # 클립보드에 UTF-16LE로 복사된 파일경로 붙여넣고 Enter 입력
-    send_keys("^v{ENTER}")
-
-    logging.info(f"csv 데이터를 아래 경로에 저장하였습니다.")
-    logging.info(f"저장경로 : {str(save_path)}")
+    # 주문 직후 텔레그램 표시용이라 저장에 실패해도 저녁 주문 작업은 멈추지 않는다 ('주문내역 CSV 없음'으로 표시됨).
+    # 실패 때 저장 창은 save_csv_via_dialog가 닫아, 다음 주문 화면의 키 입력을 가로채지 않게 한다.
+    try:
+        if save_csv_via_dialog(save_path, "주문내역"):
+            logging.info(f"csv 데이터를 아래 경로에 저장하였습니다.")
+            logging.info(f"저장경로 : {str(save_path)}")
+        else:
+            logging.warning("[저장 실패] '다른 이름으로 저장' 대화상자가 열리지 않음 (주문내역)")
+    except Exception as e:
+        logging.error(str(e))
 
     # 마우스 및 키보드 잠금 해제
     block_input(False)
@@ -211,6 +208,7 @@ def get_unfilled_tickers_dict(selected_user, account_index) -> dict:
                 pass  # 창이 이미 닫혔거나 응답 없는 상태일 수 있음 — 무시하고 원래 예외를 그대로 전달
             raise Exception("미체결 그리드 컨트롤을 찾을 수 없습니다 (화면 구조 이상 의심).")
 
+        close_save_dialogs("미체결 저장 전 — 남아 있던 창")
         grid_rect = grid.rectangle()
         logging.info(f"그리드 위치: left={grid_rect.left}, top={grid_rect.top}, right={grid_rect.right}, bottom={grid_rect.bottom}")
         x = int(grid_rect.left + (grid_rect.right - grid_rect.left) / 2)
@@ -225,10 +223,17 @@ def get_unfilled_tickers_dict(selected_user, account_index) -> dict:
         logging.info("'Csv로 저장' 버튼을 클릭하였습니다.")
         time.sleep(1)
 
-        logging.info("'다른 이름으로 저장' 창 대기 중 (최대 5초)...")
-        dialog = wait_for_window("다른 이름으로 저장", main_window, "다른 이름으로 저장", "Window", timeout=5)
-        if not dialog:
-            # wait_for_window는 못 찾아도 예외를 던지지 않고 None을 반환한다 (utils.py:449).
+        try:
+            # 창은 떴는데 파일이 안 생기면 예외 (저장 창은 닫힘) — 호출부가 스킵하도록 그대로 올린다
+            saved = save_csv_via_dialog(save_path, "미체결 주문", timeout=5)
+        except Exception:
+            try:
+                order_window.close()
+            except Exception:
+                pass
+            raise
+        if not saved:
+            # 창이 안 뜨면 save_csv_via_dialog는 False를 돌려준다.
             # 실측 확인됨: 미체결 그리드가 진짜 비어있으면 우클릭해도 컨텍스트 메뉴 자체가
             # 안 뜨고, 그래서 "다른 이름으로 저장" 창도 안 뜬다 — 이건 정상적인 "미체결 없음"
             # 케이스다. 저장 시도 전에 이미 기존 파일을 지워뒀으므로(위 unlink), 여기서
@@ -245,20 +250,10 @@ def get_unfilled_tickers_dict(selected_user, account_index) -> dict:
             logging.info("[중복방지] '다른 이름으로 저장' 창 없음 — 그리드가 비어 미체결 주문 없음으로 확인.")
             return {}
 
-        copy_to_clipboard(str(save_path))
-        send_keys("%n")
-        send_keys("^v{ENTER}")
-        time.sleep(1)
-
         try:
             order_window.close()
         except Exception:
             pass  # 저장 자체는 끝났으므로 창 닫기 실패로 전체를 실패 처리하지 않음
-
-        if not save_path.exists():
-            # 저장창은 떴지만 실제로 파일이 새로 생기지 않음 (예: 덮어쓰기 확인
-            # 등 추가 팝업을 처리 못해 저장이 완결되지 않음) — 실패로 처리.
-            raise Exception("미체결 CSV가 새로 생성되지 않음 — 저장이 실제로 완료되지 않은 것으로 추정.")
 
         logging.info(f"[중복방지] 미체결 CSV 저장: {save_path}")
 
