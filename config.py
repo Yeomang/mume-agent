@@ -40,6 +40,7 @@ class Config:
     HTS_WINDOW_NAME = os.getenv("HTS_WINDOW_NAME", "") or "iMeritz"
 
     AGENT_AUTH_USER_ID = os.getenv("AGENT_AUTH_USER_ID", "")
+    TELEGRAM_OWNER_ID = ""   # 텔레그램 설정을 가져온 agent_settings 행의 주인 (발송 이력 기록용)
 
     _db_loaded = False
 
@@ -82,6 +83,7 @@ class Config:
                 cls.HTS_EXE_PATH = row["hts_exe_path"]
             if row.get("hts_window_name"):
                 cls.HTS_WINDOW_NAME = row["hts_window_name"]
+            cls.TELEGRAM_OWNER_ID = row.get("auth_user_id") or ""
             if row.get("auth_user_id") and not cls.AGENT_AUTH_USER_ID:
                 cls.AGENT_AUTH_USER_ID = row["auth_user_id"]
 

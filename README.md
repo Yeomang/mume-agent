@@ -4,7 +4,7 @@
 
 웹 콘솔([mume-console](../mume-console))에서 HTTP API로 제어하며, 스케줄 또는 수동으로 작업을 실행한다.
 
-> **최종 업데이트:** 2026-11-04
+> **최종 업데이트:** 2026-11-08
 
 ---
 
@@ -12,6 +12,7 @@
 
 | 날짜 | 내용 |
 |------|------|
+| 2026-11-08 | 보낸 텔레그램 메시지를 Supabase `telegram_message_log`에 한 건씩 기록(`utils.send_telegram_message` → `_log_telegram_message`) — 콘솔 관리자 페이지 'Telegram 발송 이력'에서 조회. 받는 사람은 이 에이전트 텔레그램 설정의 주인(`Config.TELEGRAM_OWNER_ID`, 콘솔 지연 알림은 그 사이클 주인), 작업 이름(`JOB_NAME`)·봇 종류·성공 여부·실패 사유(봇 토큰은 가림) 포함. 기록이 실패해도 알림은 그대로 |
 | 2026-11-04 | CSV 저장·컨트롤 탐색·아침 작업 보강 — ① `find_control_by_criteria`가 컨트롤이 없으면 다시 찾지 않고 바로 None을 돌려주던 버그 수정(`retries`대로 재시도, `silent`는 그대로 1회) ② CSV 저장을 `save_csv_via_dialog`로 통일: 예전 파일 삭제 → 저장 창 닫힘·새 파일 생성 확인 → 실패 시 1회 재입력, 그래도 안 되면 저장 창을 닫고 예외 (예전 파일을 이번 결과로 읽거나 남은 저장 창이 다음 화면을 막던 문제 — 11/04 홍승표 4번 [6104] 실패) ③ 저장 전 남아 있던 '다른 이름으로 저장' 창 닫기 (HTS 프로세스 창만 — 메모장 등 다른 프로그램 창은 건드리지 않음) ④ 아침 작업: 계좌 하나가 실패해도 HTS 재로그인 후 다음 계좌 진행, 끝나면 실패 계좌 텔레그램 알림 + 작업은 오류로 종료 |
 | 2026-11-02 | hts_agent: 포트 9000 리슨 감시 추가 — Windows asyncio가 접속 수락 오류(WinError 64)로 리슨 소켓을 닫아 프로세스는 살아 있는데 오프라인이 되던 문제, 3번 연속 접속 실패 시 프로세스 종료 → bat가 재시작 |
 | 2026-11-01 | 배포 시점·버전 표시 — GitHub Actions가 배포 zip에 `agent_version.py`(SHA·커밋 시각·메시지)를 넣고 `/deploy-status`가 `version`으로 알려줌(수동 배포는 sha가 "manual"이라 콘솔 값으로는 알 수 없었음). `deploy_info.deployed_at`은 실제로 파일이 바뀐 배포 시각만('이미 최신' 확인은 `checked_at`) |
@@ -465,7 +466,7 @@ Supabase `user_accounts` 테이블에서 `is_automation_target=true`인 계좌�
 | CSV 저장 ('다른 이름으로 저장' 창) | `save_csv_via_dialog(path, label)` — 예전 파일 삭제 → 경로 입력 → 저장 창 닫힘·새 파일 확인 (창이 안 뜨면 False, 떴는데 저장 안 되면 창 닫고 예외) / `close_save_dialogs(reason)` — 남아 있던 저장 창 닫기 |
 | 텍스트 입력 | `set_focus_and_type(control, text)` |
 | HTS 프로세스 종료 | `kill_window_by_title(title)` |
-| 텔레그램 전송 | `send_telegram_message(token, chat_id, text)` |
+| 텔레그램 전송 | `send_telegram_message(token, chat_id, text, auth_user_id=None)` — 결과를 `telegram_message_log`에 기록 |
 | 거래일 판별 | `is_trading_day_today()` |
 | 시간외 거래 여부 | `is_aftermarket_open()` |
 | RDP 세션 복원 | `ensure_active_desktop()` |

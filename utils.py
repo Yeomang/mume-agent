@@ -713,14 +713,19 @@ def shutdown():
     subprocess.call(["shutdown", "/s", "/t", "5"])
 
 
-def send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message):
-    """텔레그램 봇을 통해 메시지를 전송하는 함수"""
+def send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message, auth_user_id=None):
+    """텔레그램 봇을 통해 메시지를 전송하는 함수
+
+    보낸 결과(성공/실패)는 telegram_message_log에 남긴다 (관리자 페이지 'Telegram 발송 이력').
+    auth_user_id — 받는 사람. 생략하면 이 에이전트의 텔레그램 설정 주인.
+    """
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
         "parse_mode": "Markdown"
     }
+    ok, error = False, ""
     try:
         response = requests.post(url, json=payload, timeout=15)
         response.raise_for_status()
@@ -730,16 +735,49 @@ def send_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message):
         # 보이는 오탐을 막기 위해 응답 본문의 ok 필드도 반드시 확인한다.
         data = response.json()
         if not data.get("ok", False):
+            error = str(data.get("description") or data)
             logging.error(f"텔레그램 알림 전송 실패 (API 응답 ok=false): {data}\n메시지: {message}")
-            return
-        logging.info(f"텔레그램 알림 전송 성공:\n{message}")
+        else:
+            ok = True
+            logging.info(f"텔레그램 알림 전송 성공:\n{message}")
     except requests.exceptions.RequestException as e:
         body = getattr(e.response, "text", "") if getattr(e, "response", None) is not None else ""
+        error = body or type(e).__name__
         logging.error(f"텔레그램 알림 전송 실패: {e}" + (f" | 응답: {body}" if body else ""))
     except Exception as e:
+        error = str(e)
         logging.error(f"텔레그램 알림 전송 중 예기치 않은 오류: {e}\n메시지: {message}")
+    _log_telegram_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, message, ok, error, auth_user_id)
 
-        
+
+def _log_telegram_message(token, chat_id, message, ok, error, auth_user_id=None):
+    """발송 이력 한 줄 기록. 기록이 실패해도 알림 흐름에는 영향 없음.
+    오류 내용에 봇 토큰(URL에 들어감)이 섞이지 않게 토큰은 지운다."""
+    try:
+        from config import Config
+        from supabase_client import get_supabase_client
+        uid = auth_user_id or Config.TELEGRAM_OWNER_ID or Config.AGENT_AUTH_USER_ID
+        if not uid:
+            return
+        bot_type = ("order" if token and token == Config.TELEGRAM_BOT_TOKEN_ORDER
+                    else "execution" if token and token == Config.TELEGRAM_BOT_TOKEN_EXECUTION else "")
+        sb = get_supabase_client()
+        if not sb:
+            return
+        sb.table("telegram_message_log").insert({
+            "auth_user_id": uid,
+            "chat_id": str(chat_id or ""),
+            "bot_type": bot_type,
+            "source": "agent",
+            "job": os.getenv("JOB_NAME", ""),
+            "message": str(message or "")[:4096],
+            "ok": ok,
+            "error": (error.replace(token, "***") if token else error)[:500],
+        }, returning="minimal").execute()
+    except Exception as e:
+        logging.warning(f"텔레그램 발송 이력 기록 실패: {e}")
+
+
 def _now_et():
     """현재 미국 동부시간(ET) datetime 반환."""
     from zoneinfo import ZoneInfo

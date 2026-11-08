@@ -545,7 +545,8 @@ def orders_execution_update_supabase(
         if not is_test_mode:
             for _notif in _pending_notifs:
                 try:
-                    send_telegram_message(Config.TELEGRAM_BOT_TOKEN_EXECUTION, _notif.get("chat_id", Config.TELEGRAM_CHAT_ID), _notif["message"])
+                    send_telegram_message(Config.TELEGRAM_BOT_TOKEN_EXECUTION, _notif.get("chat_id", Config.TELEGRAM_CHAT_ID), _notif["message"],
+                                          auth_user_id=_notif.get("auth_user_id"))
                 except Exception as _ne:
                     logging.warning(f"지연 알림 발송 실패: {_ne}")
 
