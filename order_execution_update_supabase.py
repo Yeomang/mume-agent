@@ -337,7 +337,7 @@ def orders_execution_update_supabase(
             _comp_avg = float(_computed.get("avg_price") or 0)
             _t_display = f"{float(_t_value):.1f}T" if _t_value else "0T"
             _progress_display = f"{_progress_rate * 100:.1f}%" if _progress_rate and abs(_progress_rate) <= 1 else f"{_progress_rate:.1f}%"
-            _pnl_sign = "+" if _cumulative_pnl >= 0 else ""
+            _pnl_sign = "+" if _cumulative_pnl >= 0 else "-"
             _mode_label = method_ver + (" 리버스모드" if method_ver == "V4.0" and _computed.get("v4_mode") == "reverse" else "")
             _quarter_progress = ""
             if method_ver == "V2.2" and _computed.get("quarter_mode") == "쿼터손절모드":

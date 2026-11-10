@@ -73,19 +73,20 @@ def _read_usd_deposit(user: str, account_index: int) -> float:
     return 0.0
 
 
-def _estimate_total_buy_amount(user: str, account_index: int) -> float:
-    """Supabase에서 해당 계좌의 활성 사이클들의 예상 매수 금액 합계를 계산한다."""
+def _estimate_total_buy_amount(user: str, account_index: int) -> tuple[float, float]:
+    """Supabase에서 해당 계좌 활성 사이클들의 예상 매수 금액 합계 (본 주문, 하락대비 1주 주문)를 계산한다."""
     try:
         from supabase_client import get_supabase_client, supabase_fetch_all
         from automation_target_store import get_auth_user_ids
+        from hts_orders_from_supabase import buy_amounts
         sb = get_supabase_client()
         if sb is None:
-            return 0.0
+            return 0.0, 0.0
 
         uids = get_auth_user_ids()
         cycles_res = supabase_fetch_all(
             lambda s, e: sb.table("cycle_master")
-            .select("id, status")
+            .select("id, status, method")
             .in_("status", ["진행중", "시작전"])
             .in_("auth_user_id", uids)
             .eq("user_name", user)
@@ -94,46 +95,26 @@ def _estimate_total_buy_amount(user: str, account_index: int) -> float:
             .range(s, e)
             .execute()
         )
-        cycle_ids = [int(r["id"]) for r in (cycles_res.data or []) if r.get("id")]
-        if not cycle_ids:
-            return 0.0
+        method_by_id = {int(r["id"]): r.get("method", "") for r in (cycles_res.data or []) if r.get("id")}
+        if not method_by_id:
+            return 0.0, 0.0
 
         latest_res = supabase_fetch_all(
             lambda s, e: sb.table("cycle_trades_latest")
             .select("cycle_id, computed")
-            .in_("cycle_id", cycle_ids)
+            .in_("cycle_id", list(method_by_id))
             .range(s, e)
             .execute()
         )
-        total = 0.0
+        core = extra = 0.0
         for r in (latest_res.data or []):
-            comp = r.get("computed") or {}
-            # 일반 LOC 매수
-            qty = comp.get("avg_loc_buy_qty")
-            price = comp.get("avg_loc_buy_price")
-            if qty and price:
-                try:
-                    total += float(qty) * float(price)
-                except (ValueError, TypeError):
-                    pass
-            # 추가 매수 (star/dip/quarter 등)
-            for q_key, p_key in [
-                ("star_loc_buy_qty", "star_loc_buy_price"),
-                ("dip_buy_qty", "dip_buy_price"),
-                ("q_dip_buy_qty", "q_dip_buy_price"),
-                ("qn10_loc_buy_qty", "qn10_loc_buy_price"),
-            ]:
-                q = comp.get(q_key)
-                p = comp.get(p_key)
-                if q and p:
-                    try:
-                        total += float(q) * float(p)
-                    except (ValueError, TypeError):
-                        pass
-        return total
+            c, x = buy_amounts(method_by_id.get(int(r["cycle_id"]), ""), r.get("computed") or {})
+            core += c
+            extra += x
+        return core, extra
     except Exception as e:
         logging.warning(f"[예수금체크] 매수 금액 추정 실패: {e}")
-        return 0.0
+        return 0.0, 0.0
 
 
 def _sync_cash_balance_to_db(user: str, account_index: int):
@@ -279,30 +260,37 @@ def _sync_stock_balance_to_db(user: str, account_index: int):
         logging.warning(f"[잔고DB] Supabase 동기화 실패: {e}")
 
 
-def _check_cash_sufficiency(user: str, account_index: int):
-    """예수금이 예상 매수 금액 대비 부족하면 텔레그램 경고를 보낸다."""
+def _check_cash_sufficiency(user: str, account_index: int) -> float:
+    """예수금이 예상 매수 금액 대비 부족하면 텔레그램 경고를 보낸다. 읽은 USD 예수금을 돌려준다 (없으면 0)."""
     usd_deposit = _read_usd_deposit(user, account_index)
-    estimated_buy = _estimate_total_buy_amount(user, account_index)
+    core_buy, extra_buy = _estimate_total_buy_amount(user, account_index)
+    estimated_buy = core_buy + extra_buy
 
-    logging.info(f"[예수금체크] {user}/{account_index} 예수금: ${usd_deposit:,.2f}, 예상 매수 합계: ${estimated_buy:,.2f}")
+    logging.info(f"[예수금체크] {user}/{account_index} 예수금: ${usd_deposit:,.2f}, "
+                 f"예상 매수 합계: ${estimated_buy:,.2f} (본 주문 ${core_buy:,.2f} + 하락대비 1주 주문 ${extra_buy:,.2f})")
 
     if usd_deposit <= 0:
         logging.info(f"[예수금체크] {user}/{account_index} USD 예수금 데이터 없음")
-        return
+        return 0.0
 
     if estimated_buy <= 0:
         logging.info(f"[예수금체크] {user}/{account_index} 매수 예정 금액 없음 — 예수금만 확인 완료")
-        return
+        return usd_deposit
 
     if usd_deposit < estimated_buy:
         shortage = estimated_buy - usd_deposit
+        if usd_deposit >= core_buy:
+            outlook = "본 주문은 모두 들어가고, 하락대비 1주 주문은 낮은 가격부터 일부를 빼고 주문합니다."
+        else:
+            outlook = "본 주문도 일부 실패할 수 있습니다. 하락대비 1주 주문은 넣지 않습니다."
         message = (
             f"⚠️ *[예수금 부족 경고]*\n\n"
             f"▶ 계좌: {user} | 메리츠 | {account_index}번째 계좌\n"
             f"▶ USD 예수금: ${usd_deposit:,.2f}\n"
             f"▶ 예상 매수 합계: ${estimated_buy:,.2f}\n"
+            f"   (본 주문 ${core_buy:,.2f} + 하락대비 1주 주문 ${extra_buy:,.2f})\n"
             f"▶ 부족액: ${shortage:,.2f}\n\n"
-            f"예수금이 부족하여 일부 주문이 실패할 수 있습니다."
+            f"{outlook}"
         )
         send_telegram_message(
             Config.TELEGRAM_BOT_TOKEN_ORDER,
@@ -312,6 +300,7 @@ def _check_cash_sufficiency(user: str, account_index: int):
         logging.warning(f"[예수금체크] 예수금 부족! 부족액: ${shortage:,.2f}")
     else:
         logging.info(f"[예수금체크] 예수금 충분 (여유: ${usd_deposit - estimated_buy:,.2f})")
+    return usd_deposit
 
 
 def run_evening_job(is_test_mode: bool = False, manual: bool = False):
@@ -399,14 +388,16 @@ def run_evening_job(is_test_mode: bool = False, manual: bool = False):
             _sync_stock_balance_to_db(user, account_index)
 
             # 예수금 부족 여부 사전 체크 (부족 시 텔레그램 경고)
-            _check_cash_sufficiency(user, account_index)
+            usd_deposit = _check_cash_sufficiency(user, account_index)
 
             # Supabase에서 주문 데이터 읽어 매도/매수 실행 (사이클 레벨)
+            # 예수금을 넘겨 사이클 간 배분 — 뒤 사이클 본 주문 몫을 남기고 1주 주문은 남는 돈 안에서만
             hts_orders_from_supabase(
                 user,
                 account_index,
                 is_test_mode,
                 cycles,
+                usd_deposit=usd_deposit,
             )
 
         kill_window_by_title(hts_window_name)

@@ -235,12 +235,13 @@ def _is_computed_fresh(updated_at_str, cycle_seq, selected_user, account_index, 
     return True
 
 
-def _extract_order_list_v22(computed):
+def _extract_order_list_v22(computed, log=True):
     """V2.2 주문 리스트 추출 (computed JSON 기반)"""
     quarter_mode = computed.get("quarter_mode", "")
 
     if quarter_mode == "쿼터손절모드":
-        logging.info("[쿼터손절모드]")
+        if log:
+            logging.info("[쿼터손절모드]")
         qn10_loc_sell_price = computed.get("qn10_loc_sell_price")
         order_type_index_qn10_sell = 5 if qn10_loc_sell_price == "MOC매도" else 3
         sell_orders = [
@@ -268,14 +269,15 @@ def _extract_order_list_v22(computed):
     if extra_qty and extra_prices:
         for i in range(min(int(extra_qty), len(extra_prices))):
             if extra_prices[i]:
-                buy_orders.append({"quantity": 1, "price": extra_prices[i]})
+                buy_orders.append({"quantity": 1, "price": extra_prices[i], "extra": True})
 
-    logging.info(f"매도 주문 리스트 : {sell_orders}")
-    logging.info(f"매수 주문 리스트 : {buy_orders}")
+    if log:
+        logging.info(f"매도 주문 리스트 : {sell_orders}")
+        logging.info(f"매수 주문 리스트 : {buy_orders}")
     return sell_orders, buy_orders
 
 
-def _extract_order_list_v30(computed):
+def _extract_order_list_v30(computed, log=True):
     """V3.0 주문 리스트 추출 (computed JSON 기반)"""
     star_loc_sell_price = computed.get("star_loc_sell_price")
     if star_loc_sell_price == "MOC매도":
@@ -299,14 +301,15 @@ def _extract_order_list_v30(computed):
     if extra_qty and extra_prices:
         for i in range(min(int(extra_qty), len(extra_prices))):
             if extra_prices[i]:
-                buy_orders.append({"quantity": 1, "price": extra_prices[i]})
+                buy_orders.append({"quantity": 1, "price": extra_prices[i], "extra": True})
 
-    logging.info(f"매도 주문 리스트 : {sell_orders}")
-    logging.info(f"매수 주문 리스트 : {buy_orders}")
+    if log:
+        logging.info(f"매도 주문 리스트 : {sell_orders}")
+        logging.info(f"매수 주문 리스트 : {buy_orders}")
     return sell_orders, buy_orders
 
 
-def _extract_order_list_v40(computed):
+def _extract_order_list_v40(computed, log=True):
     """V4.0 주문 리스트 추출 (computed JSON 기반)
 
     V4.0 은 일반 모드와 리버스 모드 두 가지가 있다.
@@ -325,7 +328,8 @@ def _extract_order_list_v40(computed):
         order_type_index_loc_sell = 3  # LOC
 
     if v4_mode == "reverse":
-        logging.info("[V4.0 리버스 모드]")
+        if log:
+            logging.info("[V4.0 리버스 모드]")
         sell_orders = [
             {"quantity": computed.get("star_loc_sell_qty"), "price": star_loc_sell_price, "order_type_index": order_type_index_loc_sell},
         ]
@@ -350,11 +354,67 @@ def _extract_order_list_v40(computed):
         if extra_qty and extra_prices:
             for i in range(min(int(extra_qty), len(extra_prices))):
                 if extra_prices[i]:
-                    buy_orders.append({"quantity": 1, "price": extra_prices[i]})
+                    buy_orders.append({"quantity": 1, "price": extra_prices[i], "extra": True})
 
-    logging.info(f"매도 주문 리스트 : {sell_orders}")
-    logging.info(f"매수 주문 리스트 : {buy_orders}")
+    if log:
+        logging.info(f"매도 주문 리스트 : {sell_orders}")
+        logging.info(f"매수 주문 리스트 : {buy_orders}")
     return sell_orders, buy_orders
+
+
+_VERSION_MAP = {
+    "V2.2": _extract_order_list_v22,
+    "V3.0": _extract_order_list_v30,
+    "V4.0": _extract_order_list_v40,
+}
+
+# 주문으로 내면 안 되는 수량/가격 값
+_INVALID_ORDER_VALUES = {"", "0", 0, "쿼터손절모드", "None", "#N/A", "N/A", "#VALUE!", "#DIV/0!", None}
+
+
+def _valid_orders(orders):
+    return [
+        o for o in orders
+        if str(o["quantity"]).strip() not in _INVALID_ORDER_VALUES
+        and str(o["price"]).strip() not in _INVALID_ORDER_VALUES
+    ]
+
+
+def _order_amount(orders) -> float:
+    total = 0.0
+    for o in orders:
+        try:
+            total += float(o["quantity"]) * float(o["price"])
+        except (ValueError, TypeError):
+            pass
+    return total
+
+
+def buy_amounts(method_ver, computed) -> tuple[float, float]:
+    """computed 기준 매수 금액 (본 주문, 하락대비 1주 주문) — 실제로 낼 매수 주문 목록으로 계산."""
+    extract = _VERSION_MAP.get(method_ver)
+    if not extract or not computed:
+        return 0.0, 0.0
+    _, buys = extract(computed, log=False)
+    buys = _valid_orders(buys)
+    return (_order_amount([o for o in buys if not o.get("extra")]),
+            _order_amount([o for o in buys if o.get("extra")]))
+
+
+def _trim_extra_buys(buy_orders, budget):
+    """하락대비 1주 주문을 budget 안에서만 남긴다 — 높은 가격(체결 가능성 큰 것)부터 채우고 넘치는 낮은 가격은 뺀다.
+    본 주문은 그대로 둔다. (남길 주문, 뺀 1주 주문) 반환."""
+    extras = sorted([o for o in buy_orders if o.get("extra")], key=lambda o: float(o["price"]), reverse=True)
+    keep_ids, used = set(), 0.0
+    for o in extras:
+        amt = _order_amount([o])
+        if used + amt > budget:
+            break
+        keep_ids.add(id(o))
+        used += amt
+    kept = [o for o in buy_orders if not o.get("extra") or id(o) in keep_ids]
+    dropped = [o for o in extras if id(o) not in keep_ids]
+    return kept, dropped
 
 
 def hts_orders_from_supabase(
@@ -362,10 +422,13 @@ def hts_orders_from_supabase(
     account_index,
     is_test_mode,
     cycles=None,
+    usd_deposit=None,
 ):
     """
     Supabase에서 주문 데이터를 가져와 HTS 매도/매수 주문 실행.
     - cycles: 실행할 사이클 번호 리스트 (None이면 해당 계좌의 모든 활성 사이클 실행)
+    - usd_deposit: 주문 전 USD 예수금. 주면 계좌 안 모든 사이클의 본 매수 금액을 먼저 떼어 두고,
+      하락대비 1주 주문은 남는 돈 안에서만 낸다 (앞 사이클의 1주 주문이 뒤 사이클 본 주문 자리를 먹지 않게).
     """
     if not is_test_mode:
         if not is_trading_day_today():
@@ -380,6 +443,22 @@ def hts_orders_from_supabase(
 
     active_cycles = _get_active_cycles(sb, selected_user, account_index, cycles=cycles)
     logging.info(f"| 사용자 '{selected_user}' | HTS계좌순번 '{account_index}' | 활성 사이클: {[c['cycle_seq'] for c in active_cycles]}")
+
+    # 예수금 배분: 사이클별 본 매수 금액(주문 직전 recompute 전 값이라 근사치)을 미리 구해 둔다
+    _cash_left = None
+    _core_est = {}
+    if usd_deposit and usd_deposit > 0 and active_cycles:
+        try:
+            _lat = sb.table("cycle_trades_latest").select("cycle_id, computed").in_(
+                "cycle_id", [c["id"] for c in active_cycles]).execute()
+            _comp_by_id = {r["cycle_id"]: (r.get("computed") or {}) for r in (_lat.data or [])}
+            _core_est = {c["id"]: buy_amounts(c.get("method", ""), _comp_by_id.get(c["id"]))[0] for c in active_cycles}
+            _cash_left = float(usd_deposit)
+            logging.info(f"[예수금배분] 예수금 ${_cash_left:,.2f}, 사이클별 본 매수 추정: "
+                         f"{ {c['cycle_seq']: round(_core_est[c['id']], 2) for c in active_cycles} }")
+        except Exception as e:
+            logging.warning(f"[예수금배분] 본 매수 금액 추정 실패 — 1주 주문 조정 없이 진행: {e}")
+            _cash_left = None
 
     # 중복 방지: 미체결 탭에서 현재 주문 상태 조회
     # 조회 자체가 실패하면(창을 못 찾음, CSV가 새로 안 써짐 등) 진짜 미체결 여부를
@@ -563,16 +642,10 @@ def hts_orders_from_supabase(
                     computed["extra_loc_buy_prices"] = extra_loc_buy_prices
                     logging.info(f"시작전 사이클 첫 매수: LOC {avg_loc_buy_qty}주 @ ${avg_loc_buy_price}, 추가LOC {extra_loc_buy_qty}주")
 
-        version_map = {
-            "V2.2": _extract_order_list_v22,
-            "V3.0": _extract_order_list_v30,
-            "V4.0": _extract_order_list_v40,
-        }
-
-        if method_ver not in version_map:
+        if method_ver not in _VERSION_MAP:
             logging.info(f"'{method_ver}'은(는) 지원하지 않는 방법론 버전입니다. 빈 리스트를 반환합니다.")
 
-        sell_orders, buy_orders = version_map.get(
+        sell_orders, buy_orders = _VERSION_MAP.get(
             method_ver,
             lambda *_: ([], [])
         )(computed)
@@ -584,23 +657,14 @@ def hts_orders_from_supabase(
         _raw_buy_orders = list(buy_orders)
 
         # 유효하지 않은 주문 필터링
-        invalid_values = {"", "0", 0, "쿼터손절모드", "None", "#N/A", "N/A", "#VALUE!", "#DIV/0!", None}
-        sell_orders = [
-            order for order in sell_orders
-            if str(order["quantity"]).strip() not in invalid_values
-            and str(order["price"]).strip() not in invalid_values
-        ]
-        buy_orders = [
-            order for order in buy_orders
-            if str(order["quantity"]).strip() not in invalid_values
-            and str(order["price"]).strip() not in invalid_values
-        ]
+        sell_orders = _valid_orders(sell_orders)
+        buy_orders = _valid_orders(buy_orders)
 
         # 원금 부족 감지: qty=0이지만 price는 유효한 주문 → per_buy < 주가
         _zero_qty_buy_orders = [
             o for o in _raw_buy_orders
             if str(o.get("quantity", "")).strip() in {"0", 0}
-            and str(o.get("price", "")).strip() not in invalid_values
+            and str(o.get("price", "")).strip() not in _INVALID_ORDER_VALUES
         ]
 
         # [중요] quantity를 int로 변환 — float(1.0) 상태로 HTS에 입력하면
@@ -661,6 +725,20 @@ def hts_orders_from_supabase(
             logging.info(">>>>> 매도 주문은 이미 존재하므로 스킵합니다. <<<<<")
         else:
             logging.info(">>>>> 매도할 데이터가 없으므로 주문을 SKIP합니다. <<<<<")
+
+        # 예수금 배분: 뒤 사이클 본 매수 몫을 남기고, 남는 돈 안에서만 하락대비 1주 주문을 낸다
+        _trim_note = ""
+        if _cash_left is not None and buy_orders and not skip_buy:
+            _later_core = sum(_core_est.get(c["id"], 0.0) for c in active_cycles[iternum:])
+            _core_now = _order_amount([o for o in buy_orders if not o.get("extra")])
+            buy_orders, _dropped = _trim_extra_buys(buy_orders, _cash_left - _core_now - _later_core)
+            if _dropped:
+                _dropped_prices = [float(o["price"]) for o in _dropped]
+                logging.warning(f"[예수금배분] 사이클 #{cycle_seq}: 남은 예수금 ${_cash_left:,.2f}, 이번 본 매수 ${_core_now:,.2f}, "
+                                f"뒤 사이클 본 매수 ${_later_core:,.2f} → 하락대비 1주 주문 {len(_dropped)}건 제외 {_dropped_prices}")
+                _trim_note = (f"\n▶ 예수금 부족으로 하락대비 1주 주문 {len(_dropped)}건 제외 "
+                              f"(${min(_dropped_prices):,.2f}~${max(_dropped_prices):,.2f}, 합계 ${_order_amount(_dropped):,.2f})")
+            _cash_left -= _order_amount(buy_orders)
 
         if buy_orders and not skip_buy:
             buy_success, buy_err = hts_order_buy(selected_user, account_index, ticker, buy_orders, order_type_index, is_test_mode)
@@ -782,7 +860,7 @@ def hts_orders_from_supabase(
         per_buy_val = computed.get("dynamic_per_buy") or computed.get("repeating_per_buy") or computed.get("per_buy") or (principal / split_count if split_count else 0)
         cumulative_pnl = computed.get("cumulative_pnl", 0) or 0
         t_display = f"{float(t_value):.1f}T" if t_value else "0T"
-        pnl_sign = "+" if cumulative_pnl >= 0 else ""
+        pnl_sign = "+" if cumulative_pnl >= 0 else "-"
 
         start_date = cycle.get("start_date") or "-"
 
@@ -798,6 +876,7 @@ def hts_orders_from_supabase(
             f"▶ 실현손익금: {pnl_sign}${abs(cumulative_pnl):,.2f}\n"
             f"▶ 실제 HTS 주문내역\n"
             f"{order_lines}"
+            f"{_trim_note}"
         )
         send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, message)
 
