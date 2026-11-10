@@ -74,7 +74,7 @@ def _read_usd_deposit(user: str, account_index: int) -> float:
 
 
 def _estimate_total_buy_amount(user: str, account_index: int) -> tuple[float, float]:
-    """Supabase에서 해당 계좌 활성 사이클들의 예상 매수 금액 합계 (본 주문, 하락대비 1주 주문)를 계산한다."""
+    """Supabase에서 해당 계좌 활성 사이클들의 예상 매수 금액 합계 (본 주문, 하락대비추가매수)를 계산한다."""
     try:
         from supabase_client import get_supabase_client, supabase_fetch_all
         from automation_target_store import get_auth_user_ids
@@ -267,7 +267,7 @@ def _check_cash_sufficiency(user: str, account_index: int) -> float:
     estimated_buy = core_buy + extra_buy
 
     logging.info(f"[예수금체크] {user}/{account_index} 예수금: ${usd_deposit:,.2f}, "
-                 f"예상 매수 합계: ${estimated_buy:,.2f} (본 주문 ${core_buy:,.2f} + 하락대비 1주 주문 ${extra_buy:,.2f})")
+                 f"예상 매수 합계: ${estimated_buy:,.2f} (본 주문 ${core_buy:,.2f} + 하락대비추가매수 ${extra_buy:,.2f})")
 
     if usd_deposit <= 0:
         logging.info(f"[예수금체크] {user}/{account_index} USD 예수금 데이터 없음")
@@ -280,15 +280,15 @@ def _check_cash_sufficiency(user: str, account_index: int) -> float:
     if usd_deposit < estimated_buy:
         shortage = estimated_buy - usd_deposit
         if usd_deposit >= core_buy:
-            outlook = "본 주문은 모두 들어가고, 하락대비 1주 주문은 낮은 가격부터 일부를 빼고 주문합니다."
+            outlook = "본 주문은 모두 들어가고, 하락대비추가매수은 낮은 가격부터 일부를 빼고 주문합니다."
         else:
-            outlook = "본 주문도 일부 실패할 수 있습니다. 하락대비 1주 주문은 넣지 않습니다."
+            outlook = "본 주문도 일부 실패할 수 있습니다. 하락대비추가매수은 넣지 않습니다."
         message = (
             f"⚠️ *[예수금 부족 경고]*\n\n"
             f"▶ 계좌: {user} | 메리츠 | {account_index}번째 계좌\n"
             f"▶ USD 예수금: ${usd_deposit:,.2f}\n"
             f"▶ 예상 매수 합계: ${estimated_buy:,.2f}\n"
-            f"   (본 주문 ${core_buy:,.2f} + 하락대비 1주 주문 ${extra_buy:,.2f})\n"
+            f"   (본 주문 ${core_buy:,.2f} + 하락대비추가매수 ${extra_buy:,.2f})\n"
             f"▶ 부족액: ${shortage:,.2f}\n\n"
             f"{outlook}"
         )
@@ -391,7 +391,7 @@ def run_evening_job(is_test_mode: bool = False, manual: bool = False):
             usd_deposit = _check_cash_sufficiency(user, account_index)
 
             # Supabase에서 주문 데이터 읽어 매도/매수 실행 (사이클 레벨)
-            # 예수금을 넘겨 사이클 간 배분 — 뒤 사이클 본 주문 몫을 남기고 1주 주문은 남는 돈 안에서만
+            # 예수금을 넘겨 사이클 간 배분 — 본 주문은 예수금 안으로, 하락대비추가매수는 뒤 사이클 본 주문 몫을 남긴 돈 안에서만
             hts_orders_from_supabase(
                 user,
                 account_index,

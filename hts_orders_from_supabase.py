@@ -391,7 +391,7 @@ def _order_amount(orders) -> float:
 
 
 def buy_amounts(method_ver, computed) -> tuple[float, float]:
-    """computed 기준 매수 금액 (본 주문, 하락대비 1주 주문) — 실제로 낼 매수 주문 목록으로 계산."""
+    """computed 기준 매수 금액 (본 주문, 하락대비추가매수) — 실제로 낼 매수 주문 목록으로 계산."""
     extract = _VERSION_MAP.get(method_ver)
     if not extract or not computed:
         return 0.0, 0.0
@@ -401,9 +401,37 @@ def buy_amounts(method_ver, computed) -> tuple[float, float]:
             _order_amount([o for o in buys if o.get("extra")]))
 
 
+# 수량을 줄인 본 주문이 수수료 때문에 다시 거부되지 않게 남겨 두는 여유 (0.5%)
+_FEE_BUFFER = 1.005
+
+
+def _cap_core_buys(buy_orders, budget):
+    """본 매수 주문을 budget 안으로 맞춘다 — 앞 주문부터 채우고, 남은 돈보다 큰 주문은 살 수 있는 수량으로 줄인다
+    (통째로 거부되는 것보다 낫다). 하락대비추가매수는 그대로 둔다. (주문 목록, [(원래 수량, 줄인 수량, 가격)]) 반환."""
+    result, changes, left = [], [], budget
+    for o in buy_orders:
+        if o.get("extra"):
+            result.append(o)
+            continue
+        try:
+            qty, price = int(o["quantity"]), float(o["price"])
+        except (ValueError, TypeError):
+            result.append(o)
+            continue
+        if qty * price > left:
+            new_qty = max(0, int(left // (price * _FEE_BUFFER)))
+            changes.append((qty, new_qty, price))
+            if new_qty == 0:
+                continue
+            o = {**o, "quantity": new_qty}
+        result.append(o)
+        left -= int(o["quantity"]) * price
+    return result, changes
+
+
 def _trim_extra_buys(buy_orders, budget):
-    """하락대비 1주 주문을 budget 안에서만 남긴다 — 높은 가격(체결 가능성 큰 것)부터 채우고 넘치는 낮은 가격은 뺀다.
-    본 주문은 그대로 둔다. (남길 주문, 뺀 1주 주문) 반환."""
+    """하락대비추가매수를 budget 안에서만 남긴다 — 높은 가격(체결 가능성 큰 것)부터 채우고 넘치는 낮은 가격은 뺀다.
+    본 주문은 그대로 둔다. (남길 주문, 뺀 하락대비추가매수) 반환."""
     extras = sorted([o for o in buy_orders if o.get("extra")], key=lambda o: float(o["price"]), reverse=True)
     keep_ids, used = set(), 0.0
     for o in extras:
@@ -428,7 +456,8 @@ def hts_orders_from_supabase(
     Supabase에서 주문 데이터를 가져와 HTS 매도/매수 주문 실행.
     - cycles: 실행할 사이클 번호 리스트 (None이면 해당 계좌의 모든 활성 사이클 실행)
     - usd_deposit: 주문 전 USD 예수금. 주면 계좌 안 모든 사이클의 본 매수 금액을 먼저 떼어 두고,
-      하락대비 1주 주문은 남는 돈 안에서만 낸다 (앞 사이클의 1주 주문이 뒤 사이클 본 주문 자리를 먹지 않게).
+      하락대비추가매수는 남는 돈 안에서만 낸다 (앞 사이클의 하락대비추가매수가 뒤 사이클 본 주문 자리를 먹지 않게).
+      본 매수가 남은 예수금보다 크면 살 수 있는 수량으로 줄인다.
     """
     if not is_test_mode:
         if not is_trading_day_today():
@@ -457,7 +486,7 @@ def hts_orders_from_supabase(
             logging.info(f"[예수금배분] 예수금 ${_cash_left:,.2f}, 사이클별 본 매수 추정: "
                          f"{ {c['cycle_seq']: round(_core_est[c['id']], 2) for c in active_cycles} }")
         except Exception as e:
-            logging.warning(f"[예수금배분] 본 매수 금액 추정 실패 — 1주 주문 조정 없이 진행: {e}")
+            logging.warning(f"[예수금배분] 본 매수 금액 추정 실패 — 예수금 배분 없이 진행: {e}")
             _cash_left = None
 
     # 중복 방지: 미체결 탭에서 현재 주문 상태 조회
@@ -726,18 +755,24 @@ def hts_orders_from_supabase(
         else:
             logging.info(">>>>> 매도할 데이터가 없으므로 주문을 SKIP합니다. <<<<<")
 
-        # 예수금 배분: 뒤 사이클 본 매수 몫을 남기고, 남는 돈 안에서만 하락대비 1주 주문을 낸다
+        # 예수금 배분: 본 매수는 남은 예수금 안으로(넘치면 수량을 줄임),
+        # 하락대비추가매수는 뒤 사이클 본 매수 몫까지 남긴 돈 안에서만 낸다
         _trim_note = ""
         if _cash_left is not None and buy_orders and not skip_buy:
+            buy_orders, _capped = _cap_core_buys(buy_orders, _cash_left)
+            for _q0, _q1, _p in _capped:
+                logging.warning(f"[예수금배분] 사이클 #{cycle_seq}: 남은 예수금 ${_cash_left:,.2f} → 본 매수 ${_p:,.2f} {_q0}주를 {_q1}주로 줄임")
+                _trim_note += (f"\n▶ 예수금 부족으로 본 매수 ${_p:,.2f} {_q0}주 → {_q1}주로 줄여 주문"
+                               if _q1 else f"\n▶ 예수금 부족으로 본 매수 ${_p:,.2f} {_q0}주 주문 못 함")
             _later_core = sum(_core_est.get(c["id"], 0.0) for c in active_cycles[iternum:])
             _core_now = _order_amount([o for o in buy_orders if not o.get("extra")])
             buy_orders, _dropped = _trim_extra_buys(buy_orders, _cash_left - _core_now - _later_core)
             if _dropped:
                 _dropped_prices = [float(o["price"]) for o in _dropped]
                 logging.warning(f"[예수금배분] 사이클 #{cycle_seq}: 남은 예수금 ${_cash_left:,.2f}, 이번 본 매수 ${_core_now:,.2f}, "
-                                f"뒤 사이클 본 매수 ${_later_core:,.2f} → 하락대비 1주 주문 {len(_dropped)}건 제외 {_dropped_prices}")
-                _trim_note = (f"\n▶ 예수금 부족으로 하락대비 1주 주문 {len(_dropped)}건 제외 "
-                              f"(${min(_dropped_prices):,.2f}~${max(_dropped_prices):,.2f}, 합계 ${_order_amount(_dropped):,.2f})")
+                                f"뒤 사이클 본 매수 ${_later_core:,.2f} → 하락대비추가매수 {len(_dropped)}건 제외 {_dropped_prices}")
+                _trim_note += (f"\n▶ 예수금 부족으로 하락대비추가매수 {len(_dropped)}건 제외 "
+                               f"(${min(_dropped_prices):,.2f}~${max(_dropped_prices):,.2f}, 합계 ${_order_amount(_dropped):,.2f})")
             _cash_left -= _order_amount(buy_orders)
 
         if buy_orders and not skip_buy:
