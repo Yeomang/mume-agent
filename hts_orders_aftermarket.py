@@ -237,6 +237,11 @@ def hts_orders_aftermarket(
         else:
             # 매도/매수 아무것도 체결 안 됨 → aftermarket 보충 주문 발동
             # (evening 주문 거부/에러로 누락됐거나, 가격 포지션 문제로 전량 미체결)
+            # [V2.2 쿼터손절모드] 평단 -10% 이하에서 쿼터 1회매수금만 사는 구간이라 미체결이 전략상 정상 →
+            # 1회매수금(원금/분할수)을 현재가+3%로 보충매수하면 전략과 어긋나므로 건너뛴다.
+            if method_ver == "V2.2" and computed.get("quarter_mode") == "쿼터손절모드":
+                logging.info(f"[aftermarket] 사이클 #{cycle_seq}: V2.2 쿼터손절모드 → 자연 미체결, aftermarket 없음")
+                continue
             logging.info(f"[aftermarket] 사이클 #{cycle_seq}: 체결 건수 0 → 추가 매수 주문 실행")
             buy_df = filtered_df[filtered_df['주문구분'] == '매수']
             executed_amount = round((buy_df['체결수량'] * buy_df['체결단가']).sum(), 2)
