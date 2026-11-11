@@ -333,6 +333,11 @@ def orders_execution_update_supabase(
             _t_value = _computed.get("t_value", 0) or 0
             _progress_rate = _computed.get("progress_rate", 0) or 0
             _per_buy = _computed.get("dynamic_per_buy") or _computed.get("repeating_per_buy") or _computed.get("per_buy") or (_principal / _split_count if _split_count else 0)
+            # V4.0 리버스는 1회매수금(잔금/(분할수-T))을 쓰지 않고 현금/4만큼 산다 — 막바지에 커지는 1회매수금 대신 실제 매수금 표시
+            if method_ver == "V4.0" and _computed.get("v4_mode") == "reverse":
+                _per_buy_text = f"리버스 매수금(현금/4): ${float(_computed.get('cash_balance') or 0) / 4:,.0f}"
+            else:
+                _per_buy_text = f"1회매수금: ${_per_buy:,.0f}"
             _cumulative_pnl = _computed.get("cumulative_pnl", 0) or 0
             _comp_avg = float(_computed.get("avg_price") or 0)
             _t_display = f"{float(_t_value):.1f}T" if _t_value else "0T"
@@ -344,7 +349,7 @@ def orders_execution_update_supabase(
                 _quarter_progress = f" (쿼터손절모드 {_computed.get('quarter_progress', 0)}/10회)"
             elif method_ver in ("V3.0", "V4.0") and _computed.get("in_quarter"):
                 _quarter_progress = " (쿼터매도기간)"
-            return _computed, _t_display, _progress_display, _per_buy, _cumulative_pnl, _comp_avg, _pnl_sign, _mode_label, _quarter_progress
+            return _computed, _t_display, _progress_display, _per_buy_text, _cumulative_pnl, _comp_avg, _pnl_sign, _mode_label, _quarter_progress
 
         # 텔레그램 메시지는 INSERT+recompute 후에 전송 (체결 후 computed 사용)
         _telegram_context = {
@@ -473,7 +478,7 @@ def orders_execution_update_supabase(
                 )
 
         # ── 텔레그램 메시지 전송 (INSERT+recompute 후 — 체결 후 computed 사용) ──
-        _, _t_display, _progress_display, _per_buy, _cumulative_pnl, _, _pnl_sign, _mode_label, _quarter_progress = _load_computed_for_telegram()
+        _, _t_display, _progress_display, _per_buy_text, _cumulative_pnl, _, _pnl_sign, _mode_label, _quarter_progress = _load_computed_for_telegram()
         _ctx = _telegram_context
 
         if _ctx["is_rerun"] and _ctx["added_count"] <= 0:
@@ -486,7 +491,7 @@ def orders_execution_update_supabase(
                 f"💵 *[무매사이클 #{cycle_seq}] 추가 체결 {_ctx['added_count']}건*\n\n"
                 f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
                 f"▶ 종목: *{ticker} ({_mode_label})*\n"
-                f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | 1회매수금: ${_per_buy:,.0f}\n"
+                f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | {_per_buy_text}\n"
                 f"▶ 시작일: {_start_date}\n"
                 f"▶ 진행률: {_progress_display} ({_t_display}){_quarter_progress}\n"
                 f"▶ 실현손익금: {_pnl_sign}${abs(_cumulative_pnl):,.2f}\n"
@@ -505,7 +510,7 @@ def orders_execution_update_supabase(
                     f"▶ {inquiry_start_date}~{inquiry_end_date}\n"
                     f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
                     f"▶ 종목: *{ticker} ({_mode_label})*\n"
-                    f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | 1회매수금: ${_per_buy:,.0f}\n"
+                    f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | {_per_buy_text}\n"
                     f"▶ 시작일: {_start_date}\n"
                     f"▶ 보유수량: {balance_from_hts}주 | 진행률: {_progress_display} ({_t_display}){_quarter_progress}\n"
                     f"▶ 현재가: ${current_price} | 평단가: ${average_price}\n"
@@ -519,7 +524,7 @@ def orders_execution_update_supabase(
                     f"▶ {inquiry_start_date}~{inquiry_end_date}\n"
                     f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
                     f"▶ 종목: *{ticker} ({_mode_label})*\n"
-                    f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | 1회매수금: ${_per_buy:,.0f}\n"
+                    f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | {_per_buy_text}\n"
                     f"▶ 시작일: {_start_date}\n"
                     f"▶ 진행률: {_progress_display} ({_t_display}){_quarter_progress}\n"
                     f"▶ 실현손익금: {_pnl_sign}${abs(_cumulative_pnl):,.2f}\n"
@@ -533,7 +538,7 @@ def orders_execution_update_supabase(
                 f"▶ {inquiry_start_date}~{inquiry_end_date}\n"
                 f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
                 f"▶ 종목: *{ticker} ({_mode_label})*\n"
-                f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | 1회매수금: ${_per_buy:,.0f}\n"
+                f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | {_per_buy_text}\n"
                 f"▶ 시작일: {_start_date}\n"
                 f"▶ 진행률: {_progress_display} ({_t_display}){_quarter_progress}\n"
                 f"▶ 실현손익금: {_pnl_sign}${abs(_cumulative_pnl):,.2f}\n"

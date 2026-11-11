@@ -280,9 +280,9 @@ def _check_cash_sufficiency(user: str, account_index: int) -> float:
     if usd_deposit < estimated_buy:
         shortage = estimated_buy - usd_deposit
         if usd_deposit >= core_buy:
-            outlook = "본 주문은 모두 들어가고, 하락대비추가매수은 낮은 가격부터 일부를 빼고 주문합니다."
+            outlook = "본 주문은 모두 들어가고, 하락대비추가매수는 낮은 가격부터 일부를 빼고 주문합니다."
         else:
-            outlook = "본 주문도 일부 실패할 수 있습니다. 하락대비추가매수은 넣지 않습니다."
+            outlook = "본 주문은 남은 예수금으로 살 수 있는 수량까지 줄여 주문하고, 하락대비추가매수는 넣지 않습니다."
         message = (
             f"⚠️ *[예수금 부족 경고]*\n\n"
             f"▶ 계좌: {user} | 메리츠 | {account_index}번째 계좌\n"

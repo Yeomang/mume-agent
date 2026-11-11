@@ -893,6 +893,11 @@ def hts_orders_from_supabase(
         split_count = int(cycle.get("split_count") or 1)
         t_value = computed.get("t_value", 0) or 0
         per_buy_val = computed.get("dynamic_per_buy") or computed.get("repeating_per_buy") or computed.get("per_buy") or (principal / split_count if split_count else 0)
+        # V4.0 리버스는 1회매수금(잔금/(분할수-T))을 쓰지 않고 현금/4만큼 산다 — 막바지에 커지는 1회매수금 대신 실제 매수금 표시
+        if method_ver == "V4.0" and computed.get("v4_mode") == "reverse":
+            per_buy_text = f"리버스 매수금(현금/4): ${float(computed.get('cash_balance') or 0) / 4:,.0f}"
+        else:
+            per_buy_text = f"1회매수금: ${per_buy_val:,.0f}"
         cumulative_pnl = computed.get("cumulative_pnl", 0) or 0
         t_display = f"{float(t_value):.1f}T" if t_value else "0T"
         pnl_sign = "+" if cumulative_pnl >= 0 else "-"
@@ -903,7 +908,7 @@ def hts_orders_from_supabase(
             f"📝 *[무매사이클 #{cycle_seq}] 매매 주문 내역*\n\n"
             f"▶ 계좌: 메리츠 | {selected_user} | {account_index}번째 계좌\n"
             f"▶ 종목: *{ticker} ({_mode_label})*\n"
-            f"▶ 원금: ${principal:,.0f} | {split_count}분할 | 1회매수금: ${per_buy_val:,.0f}\n"
+            f"▶ 원금: ${principal:,.0f} | {split_count}분할 | {per_buy_text}\n"
             f"▶ 시작일: {start_date}\n"
             f"▶ 보유수량: {balance_from_hts}주 | 진행률: {progress_rate} ({t_display}){quarter_progress}\n"
             f"▶ 현재가: ${current_price} | 평단가: ${average_price}\n"
