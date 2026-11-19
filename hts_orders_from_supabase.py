@@ -557,6 +557,9 @@ def hts_orders_from_supabase(
             # V4.0은 같은 T값 시점에 리버스모드가 먼저 선점해서 실제로는 거의
             # 발생하지 않지만(리버스모드 미진입 시 대비) 방어적으로 표시.
             quarter_progress = " (쿼터매도기간)"
+        elif method_ver == "V3.0" and computed.get("cash_exhausted"):
+            # 잔금소진: 잔금으로 1주도 못 사서 별%LOC매도가 MOC매도(보유수의 1/4)로 전환, 매수 없음
+            quarter_progress = " (잔금소진 → MOC매도)"
 
         # HTS 잔고 CSV와 DB 보유수 비교
         logging.info("HTS로부터 가져온 해외주식 보유잔고 데이터와 DB에 기록된 최신 보유수가 일치하는지 확인중...")

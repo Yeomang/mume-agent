@@ -349,6 +349,8 @@ def orders_execution_update_supabase(
                 _quarter_progress = f" (쿼터손절모드 {_computed.get('quarter_progress', 0)}/10회)"
             elif method_ver in ("V3.0", "V4.0") and _computed.get("in_quarter"):
                 _quarter_progress = " (쿼터매도기간)"
+            elif method_ver == "V3.0" and _computed.get("cash_exhausted"):
+                _quarter_progress = " (잔금소진 → MOC매도)"
             return _computed, _t_display, _progress_display, _per_buy_text, _cumulative_pnl, _comp_avg, _pnl_sign, _mode_label, _quarter_progress
 
         # 텔레그램 메시지는 INSERT+recompute 후에 전송 (체결 후 computed 사용)
