@@ -686,6 +686,25 @@ def hts_orders_from_supabase(
         # 브로커가 NBBO 이탈로 거부하면 거부된 채로 두고, 애프터마켓 job이
         # 거부된 매도 주문을 감지해 재주문한다 (hts_orders_aftermarket.py).
 
+        # V3.0 잔금소진(실제 예수금 기준): 엔진 잔금으로는 1주를 살 수 있어도 계좌 예수금으로
+        # 별%LOC매수 1주도 못 사면, 엔진 잔금소진 때와 똑같이 별%LOC매도를 MOC매도로 바꾸고 그날 매수를 쉰다.
+        # 엔진 잔금과 실제 예수금이 조금만 어긋나도(원금 입력 차이 등) 매수가 0주로 막혀 T가 멈추는 것을 막는다.
+        _trim_note = ""
+        if (method_ver == "V3.0" and _cash_left is not None and holding_qty_from_db
+                and not computed.get("in_quarter") and not computed.get("cash_exhausted")):
+            try:
+                _star_buy = float(computed.get("star_loc_buy_price") or 0)
+            except (TypeError, ValueError):
+                _star_buy = 0.0
+            if _star_buy > 0 and _cash_left < _star_buy and len(sell_orders) > 1:
+                sell_orders[1] = {**sell_orders[1], "price": "MOC매도", "order_type_index": 5}
+                buy_orders = []
+                quarter_progress = " (잔금소진 → MOC매도)"
+                logging.warning(f"[예수금배분] 사이클 #{cycle_seq}: 남은 예수금 ${_cash_left:,.2f} < 별%LOC매수가 ${_star_buy:,.2f} "
+                                f"→ 잔금소진, 별%LOC매도를 MOC매도로 바꾸고 매수 쉼")
+                _trim_note += (f"\n▶ 실제 예수금 ${_cash_left:,.2f}로 별%LOC매수가 ${_star_buy:,.2f} 1주도 못 사서 "
+                               f"잔금소진 → 별%LOC매도를 MOC매도로 바꾸고 오늘은 매수를 쉽니다")
+
         _raw_buy_orders = list(buy_orders)
 
         # 유효하지 않은 주문 필터링
@@ -760,7 +779,6 @@ def hts_orders_from_supabase(
 
         # 예수금 배분: 본 매수는 남은 예수금 안으로(넘치면 수량을 줄임),
         # 하락대비추가매수는 뒤 사이클 본 매수 몫까지 남긴 돈 안에서만 낸다
-        _trim_note = ""
         if _cash_left is not None and buy_orders and not skip_buy:
             buy_orders, _capped = _cap_core_buys(buy_orders, _cash_left)
             for _q0, _q1, _p in _capped:
