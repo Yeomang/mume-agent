@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 import platform
 from pathlib import Path
 import pandas as pd
+import csv
+import io
 
 _IS_WINDOWS = platform.system() == "Windows"
 
@@ -842,6 +844,39 @@ def is_trading_day_yesterday():
         logging.info(f"오늘({today_et}, ET {et_now.strftime('%H:%M')})는 미국 주식시장 거래 가능한 날입니다. 주문을 실행합니다.")
         return True
     
+
+def read_usd_deposit(user: str, account_index: int) -> float:
+    """외화예수금 CSV(보유잔고 저장 때 함께 저장)에서 USD 추정예수금을 읽어 반환한다. 실패 시 0.
+
+    추정예수금은 결제 전 매도 대금까지 포함해 HTS 주문가능금액과 거의 같다 (저녁 주문 예수금 배분·절세 매매에서 사용).
+    """
+    raw_dir = Path(__file__).resolve().parent / "data" / "foreign_deposit_raw"
+    csv_path = raw_dir / f"foreign_deposit_raw_{user}_{account_index}.csv"
+    if not csv_path.exists():
+        return 0.0
+    try:
+        raw_text = None
+        for enc in ("utf-8-sig", "cp949"):
+            try:
+                raw_text = csv_path.read_text(encoding=enc, errors="strict")
+                break
+            except (UnicodeDecodeError, ValueError):
+                continue
+        if raw_text is None:
+            raw_text = csv_path.read_text(encoding="cp949", errors="replace")
+
+        first_line = raw_text.split("\n", 1)[0]
+        delimiter = "\t" if "\t" in first_line else ","
+        reader = csv.DictReader(io.StringIO(raw_text), delimiter=delimiter)
+        for row in reader:
+            currency = (row.get("통화") or "").strip()
+            if currency == "USD":
+                val = str(row.get("외화추정예수금") or "0").replace(",", "").strip()
+                return float(val)
+    except Exception as e:
+        logging.warning(f"[예수금체크] USD 예수금 읽기 실패 ({csv_path.name}): {e}")
+    return 0.0
+
 
 # ─────────────────────────────────────
 # CSV 관련 공통 함수

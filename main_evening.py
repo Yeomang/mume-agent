@@ -30,6 +30,7 @@ import json
 import csv
 import io
 
+from utils import read_usd_deposit as _read_usd_deposit
 from utils import set_log_context, install_log_context_filter, send_telegram_message, hide_job_console
 install_log_context_filter()
 hide_job_console()   # 스케줄러 실행 때 뜬 cmd 창 숨기기
@@ -41,36 +42,6 @@ from utils import kill_window_by_title
 from job_control import register_job_pid, unregister_job_pid
 from automation_target_store import load_automation_target
 from config import Config
-
-
-def _read_usd_deposit(user: str, account_index: int) -> float:
-    """외화예수금 CSV에서 USD 추정예수금을 읽어 반환한다. 실패 시 0."""
-    raw_dir = BASE_DIR / "data" / "foreign_deposit_raw"
-    csv_path = raw_dir / f"foreign_deposit_raw_{user}_{account_index}.csv"
-    if not csv_path.exists():
-        return 0.0
-    try:
-        raw_text = None
-        for enc in ("utf-8-sig", "cp949"):
-            try:
-                raw_text = csv_path.read_text(encoding=enc, errors="strict")
-                break
-            except (UnicodeDecodeError, ValueError):
-                continue
-        if raw_text is None:
-            raw_text = csv_path.read_text(encoding="cp949", errors="replace")
-
-        first_line = raw_text.split("\n", 1)[0]
-        delimiter = "\t" if "\t" in first_line else ","
-        reader = csv.DictReader(io.StringIO(raw_text), delimiter=delimiter)
-        for row in reader:
-            currency = (row.get("통화") or "").strip()
-            if currency == "USD":
-                val = str(row.get("외화추정예수금") or "0").replace(",", "").strip()
-                return float(val)
-    except Exception as e:
-        logging.warning(f"[예수금체크] USD 예수금 읽기 실패 ({csv_path.name}): {e}")
-    return 0.0
 
 
 def _estimate_total_buy_amount(user: str, account_index: int) -> tuple[float, float]:

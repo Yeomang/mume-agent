@@ -19,6 +19,7 @@ import httpx
 import yfinance as yf
 from hts_orders_history_save_to_csv import save_orders_history, get_unfilled_tickers_dict
 from order_history_data_preprocessing import order_history_data_preprocessing
+from tax_trades_store import has_tax_trade, avg_and_pnl_text
 import datetime as _dt
 from datetime import timezone as _tz, timedelta as _td
 
@@ -924,6 +925,9 @@ def hts_orders_from_supabase(
         pnl_sign = "+" if cumulative_pnl >= 0 else "-"
 
         start_date = cycle.get("start_date") or "-"
+        # 절세 매매를 한 사이클은 증권사 평균단가가 사이클 평단과 달라 사이클 평단 기준으로 보여 줌
+        _avg_text, _pnl_text = avg_and_pnl_text(average_price, profit, profit_rate_pct, computed.get("avg_price"),
+                                                current_price, balance_from_hts, has_tax_trade(sb, cycle_id))
 
         message = (
             f"📝 *[무매사이클 #{cycle_seq}] 매매 주문 내역*\n\n"
@@ -932,8 +936,8 @@ def hts_orders_from_supabase(
             f"▶ 원금: ${principal:,.0f} | {split_count}분할 | {per_buy_text}\n"
             f"▶ 시작일: {start_date}\n"
             f"▶ 보유수량: {balance_from_hts}주 | 진행률: {progress_rate} ({t_display}){quarter_progress}\n"
-            f"▶ 현재가: ${current_price} | 평단가: ${average_price}\n"
-            f"▶ 평가손익: ${profit} ({profit_rate_pct}%)\n"
+            f"▶ 현재가: ${current_price} | 평단가: {_avg_text}\n"
+            f"▶ 평가손익: {_pnl_text}\n"
             f"▶ 실현손익금: {pnl_sign}${abs(cumulative_pnl):,.2f}\n"
             f"▶ 실제 HTS 주문내역\n"
             f"{order_lines}"

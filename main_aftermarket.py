@@ -35,6 +35,7 @@ from hts_login import hts_login
 from hts_orders_execution_save_to_csv import save_data_order_execution
 from order_execution_data_preprocessing import order_execution_data_preprocessing
 from hts_orders_aftermarket import hts_orders_aftermarket
+from hts_tax_trades import run_tax_trades
 from utils import kill_window_by_title, to_yyyymmdd
 from job_control import register_job_pid, unregister_job_pid
 from automation_target_store import load_automation_target
@@ -124,7 +125,7 @@ def run_aftermarket_job(is_test_mode: bool = False, manual: bool = False):
             if inquiry_start_date and inquiry_end_date:
                 save_data_order_execution(user, account_index, inquiry_start_date, inquiry_end_date)
                 order_execution_data_preprocessing(user, account_index, inquiry_start_date, inquiry_end_date)
-                hts_orders_aftermarket(
+                placed = hts_orders_aftermarket(
                     user,
                     account_index,
                     is_test_mode,
@@ -135,7 +136,7 @@ def run_aftermarket_job(is_test_mode: bool = False, manual: bool = False):
             else:
                 save_data_order_execution(user, account_index)
                 order_execution_data_preprocessing(user, account_index)
-                hts_orders_aftermarket(
+                placed = hts_orders_aftermarket(
                     user,
                     account_index,
                     is_test_mode,
@@ -143,6 +144,15 @@ def run_aftermarket_job(is_test_mode: bool = False, manual: bool = False):
                     None,
                     cycles,
                 )
+
+            # 절세 매매 (콘솔에서 예약한 '같은 수량 팔고 다시 사기') — 사이클을 골라 실행한 수동 작업에서는 하지 않음
+            if not cycles:
+                try:
+                    run_tax_trades(user, account_index, is_test_mode,
+                                   trade_ymd=inquiry_end_date if inquiry_start_date == inquiry_end_date else None,
+                                   busy_tickers=placed or set())
+                except Exception:
+                    logging.error(f"[절세매매] {user}/{account_index} 실행 실패\n{traceback.format_exc()}")
 
         kill_window_by_title(hts_window_name)
     set_log_context()

@@ -8,6 +8,7 @@ from utils import (
 )
 from config import Config
 from supabase_client import get_supabase_client, supabase_fetch_all
+from tax_trades_store import load_tax_trades, split_tax_rows, update_tax_trade, has_tax_trade, avg_and_pnl_text
 import logging
 import datetime as dt
 import pandas as pd
@@ -249,6 +250,22 @@ def orders_execution_update_supabase(
 
         # ticker 필터링
         filtered_df = df[df['종목코드'] == ticker]
+
+        # 절세 매매(같은 수량 팔고 다시 사기) 주문은 사이클 거래가 아니므로 뺀다 (에이전트가 주문 직전에 남긴 기록·주문번호로 알아봄).
+        # 다시 못 산 수량은 그날 매도가로 '사이클 매도' 한 줄을 붙여 사이클 보유수를 HTS와 맞춘다.
+        # 기록을 읽지 못하면 절세 매매가 사이클에 섞일 수 있어 이번 반영만 건너뛴다 (10시 2차 수집에서 다시).
+        from automation_target_store import get_auth_user_ids
+        _tax_rows, _tax_err = load_tax_trades(sb, get_auth_user_ids(), selected_user, account_index, ticker)
+        if _tax_err:
+            logging.warning(f"[절세매매] 사이클 #{cycle_seq}: {_tax_err} → 이번 체결 반영 건너뜀")
+            continue
+        filtered_df, _tax_n, _tax_final = split_tax_rows(filtered_df, _tax_rows, inquiry_start_date, inquiry_end_date)
+        if _tax_n:
+            logging.info(f"[절세매매] 사이클 #{cycle_seq}: 절세 매매 주문 {_tax_n}건을 사이클 반영에서 제외")
+        if not is_test_mode:
+            for _tid, _fields in _tax_final:   # 에이전트가 실행 중 멈춘 건 — 체결내역으로 결과 정리
+                update_tax_trade(sb, _tid, _fields, expect_status="실행중")
+                logging.warning(f"[절세매매] #{_tid} 실행 중 멈춘 건을 체결내역으로 정리: {_fields}")
         if filtered_df.empty:
             logging.info("체결내역 중 해당 사이클 종목에 대한 내역이 없습니다.")
             continue
@@ -480,7 +497,7 @@ def orders_execution_update_supabase(
                 )
 
         # ── 텔레그램 메시지 전송 (INSERT+recompute 후 — 체결 후 computed 사용) ──
-        _, _t_display, _progress_display, _per_buy_text, _cumulative_pnl, _, _pnl_sign, _mode_label, _quarter_progress = _load_computed_for_telegram()
+        _, _t_display, _progress_display, _per_buy_text, _cumulative_pnl, _comp_avg, _pnl_sign, _mode_label, _quarter_progress = _load_computed_for_telegram()
         _ctx = _telegram_context
 
         if _ctx["is_rerun"] and _ctx["added_count"] <= 0:
@@ -507,6 +524,9 @@ def orders_execution_update_supabase(
                 average_price = filtered['평균가'].iloc[0]
                 profit = filtered['평가손익'].iloc[0]
                 profit_rate = filtered['수익률(%)'].iloc[0]
+                # 절세 매매를 한 사이클은 증권사 평균단가가 사이클 평단과 달라 사이클 평단 기준으로 보여 줌
+                _avg_text, _pnl_text = avg_and_pnl_text(average_price, profit, profit_rate, _comp_avg,
+                                                        current_price, balance_from_hts, has_tax_trade(sb, cycle_id))
                 send_telegram_message(Config.TELEGRAM_BOT_TOKEN_EXECUTION, Config.TELEGRAM_CHAT_ID,
                     f"💵 *[무매사이클 #{cycle_seq}] 매매 체결 내역*\n\n"
                     f"▶ {inquiry_start_date}~{inquiry_end_date}\n"
@@ -515,8 +535,8 @@ def orders_execution_update_supabase(
                     f"▶ 원금: ${_principal:,.0f} | {_split_count}분할 | {_per_buy_text}\n"
                     f"▶ 시작일: {_start_date}\n"
                     f"▶ 보유수량: {balance_from_hts}주 | 진행률: {_progress_display} ({_t_display}){_quarter_progress}\n"
-                    f"▶ 현재가: ${current_price} | 평단가: ${average_price}\n"
-                    f"▶ 평가손익: ${profit} ({profit_rate}%)\n"
+                    f"▶ 현재가: ${current_price} | 평단가: {_avg_text}\n"
+                    f"▶ 평가손익: {_pnl_text}\n"
                     f"▶ 실현손익금: {_pnl_sign}${abs(_cumulative_pnl):,.2f}\n"
                     f"▶ 실제 HTS 체결내역\n"
                     f"{_ctx['formatted_orders']}")

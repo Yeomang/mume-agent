@@ -12,6 +12,8 @@ from hts_order_sell import hts_order_sell
 from hts_orders_from_supabase import _record_order_status, _is_computed_fresh
 from config import Config
 from supabase_client import get_supabase_client, supabase_fetch_all
+from tax_trades_store import load_tax_trades, split_tax_rows
+from automation_target_store import get_auth_user_ids
 import logging
 import datetime as dt
 import pandas as pd
@@ -86,12 +88,14 @@ def hts_orders_aftermarket(
     """
     Aftermarket 추가주문 실행
     - cycles: 실행할 사이클 번호 리스트 (None이면 해당 계좌의 모든 활성 사이클 실행)
+    Returns: 이번에 주문(거부 매도 재주문·보충매수)을 낸 종목 set — 같은 작업의 절세 매매가 그 종목을 미루는 데 씀
     """
+    placed_tickers = set()
     logging.info(">>>>> Aftermarket 추가주문 데이터 리스트화 <<<<<")
 
     if not is_test_mode:
         if not is_trading_day_yesterday():
-            return
+            return placed_tickers
     else:
         logging.info("테스트모드이므로 휴장일 여부와 관계없이 함수를 실행합니다.")
 
@@ -105,7 +109,7 @@ def hts_orders_aftermarket(
     if df is None:
         logging.info("CSV 파일 불러오기 실패!")
         logging.info(f"> 파일 경로 : {file_path}")
-        return
+        return placed_tickers
 
     logging.info(
         f"['{selected_user} {account_index}번째 계좌' 전체 주문 및 체결 내역 ({inquiry_start_date}~{inquiry_end_date})]\n"
@@ -115,7 +119,7 @@ def hts_orders_aftermarket(
     sb = get_supabase_client()
     if sb is None:
         logging.error("Supabase 클라이언트를 초기화할 수 없습니다.")
-        return
+        return placed_tickers
 
     active_cycles = _get_active_cycles(sb, selected_user, account_index, cycles=cycles)
     logging.info(f"| 사용자 '{selected_user}' | HTS계좌순번 '{account_index}' | 활성 사이클: {[c['cycle_seq'] for c in active_cycles]}")
@@ -156,6 +160,14 @@ def hts_orders_aftermarket(
         logging.info(f"1회매수금액 : {daily_buy_amount}")
 
         filtered_df = df[df['종목코드'] == ticker]
+        # 절세 매매(사이클 밖 매매) 주문은 빼고 판단 — 수동 재실행 때 그 체결을 정규장 체결로 오인하지 않게
+        _tax_rows, _tax_err = load_tax_trades(sb, get_auth_user_ids(), selected_user, account_index, ticker)
+        if _tax_err:
+            logging.warning(f"[aftermarket] 사이클 #{cycle_seq}: {_tax_err} → 건너뜀")
+            continue
+        filtered_df, _tax_n, _ = split_tax_rows(filtered_df, _tax_rows, with_remainder=False)
+        if _tax_n:
+            logging.info(f"[aftermarket] 사이클 #{cycle_seq}: 절세 매매 주문 {_tax_n}건 제외")
         if filtered_df.empty:
             logging.info("체결내역 중 해당 사이클 종목에 대한 내역이 없습니다.")
             continue
@@ -198,6 +210,8 @@ def hts_orders_aftermarket(
             order_sell_success, order_sell_error = hts_order_sell(
                 selected_user, account_index, ticker, resubmit_sell_orders, is_test_mode
             )
+            if order_sell_success:
+                placed_tickers.add(ticker)
             if order_sell_success and not is_test_mode:
                 _record_order_status(cycle_id, [
                     {"order_type": "aftermarket_sell", "side": "sell",
@@ -360,6 +374,8 @@ def hts_orders_aftermarket(
                     order_type_index,
                     is_test_mode,
                 )
+                if order_buy_success:
+                    placed_tickers.add(ticker)
                 if order_buy_success and not is_test_mode:
                     _record_order_status(cycle_id, [
                         {"order_type": "aftermarket_buy", "side": "buy",
@@ -399,6 +415,8 @@ def hts_orders_aftermarket(
                     send_telegram_message(Config.TELEGRAM_BOT_TOKEN_ORDER, Config.TELEGRAM_CHAT_ID, message)
             else:
                 logging.info(">>>>> Aftermarket에서 추가매수할 데이터가 없으므로 주문을 SKIP합니다. (buy_orders 필터링 후 빈 리스트) <<<<<")
+
+    return placed_tickers
 
 
 if __name__ == "__main__":
