@@ -22,6 +22,49 @@ from order_history_data_preprocessing import order_history_data_preprocessing
 from tax_trades_store import has_tax_trade, avg_and_pnl_text
 import datetime as _dt
 from datetime import timezone as _tz, timedelta as _td
+import json
+import os
+
+# 이미 알린 거부 주문 기록 — 같은 날 저녁 작업을 다시 돌려도 그 전에 거부된 주문은 다시 알리지 않는다
+_REJECTED_ALERTED_FILE = './data/rejected_alerted.json'
+_REJECTED_ALERTED_KEEP_HOURS = 36  # 주문번호는 날마다 새로 매겨지므로 하루 반만 기억
+
+
+def _rejected_order_key(selected_user, account_index, row) -> str:
+    """거부 주문 한 건의 식별 키 (주문번호 + 내용)."""
+    return "|".join(str(v) for v in (
+        selected_user, account_index, row.get('주문#', ''), row.get('주문시간', ''),
+        row.get('종목코드', ''), row.get('매매구분', ''), row.get('주문가', ''), row.get('주문량', ''),
+    ))
+
+
+def _filter_new_rejections(selected_user, account_index, df_rejected):
+    """처음 보는 거부 주문만 남기고, 남긴 것은 '알림' 기록에 넣는다.
+    기록 파일을 읽거나 쓰지 못하면 거부 주문 전체를 그대로 돌려준다 (알림이 빠지는 것보다 중복이 낫다)."""
+    now = _dt.datetime.now()
+    try:
+        with open(_REJECTED_ALERTED_FILE, encoding='utf-8') as f:
+            alerted = json.load(f)
+    except FileNotFoundError:
+        alerted = {}
+    except Exception as e:
+        logging.warning(f"[거부알림] 기록 파일을 읽지 못해 모두 알림: {e}")
+        return df_rejected
+    cutoff = now - _td(hours=_REJECTED_ALERTED_KEEP_HOURS)
+    alerted = {k: t for k, t in alerted.items() if _dt.datetime.fromisoformat(t) >= cutoff}
+
+    keys = [_rejected_order_key(selected_user, account_index, row) for _, row in df_rejected.iterrows()]
+    is_new = [k not in alerted for k in keys]
+    for k, new in zip(keys, is_new):
+        if new:
+            alerted[k] = now.isoformat(timespec='seconds')
+    try:
+        os.makedirs(os.path.dirname(_REJECTED_ALERTED_FILE), exist_ok=True)
+        with open(_REJECTED_ALERTED_FILE, 'w', encoding='utf-8') as f:
+            json.dump(alerted, f, ensure_ascii=False, indent=1)
+    except Exception as e:
+        logging.warning(f"[거부알림] 기록 파일 저장 실패: {e}")
+    return df_rejected[is_new]
 
 
 
@@ -849,6 +892,14 @@ def hts_orders_from_supabase(
                 df_order_history_filtered['_price'] = df_order_history_filtered['주문가'].apply(lambda x: float(str(x).replace(',', '')) if x else 0)
                 df_order_history_filtered = df_order_history_filtered.sort_values(by='_price', ascending=False)
 
+                # 거부된 주문은 브로커에 접수조차 안 된 것 — 주문내역 목록·주문 상태 기록에서 빼고 따로 알린다
+                if '상태' in df_order_history_filtered.columns:
+                    _is_rejected = df_order_history_filtered['상태'] == '거부'
+                    df_rejected = df_order_history_filtered[_is_rejected]
+                    df_order_history_filtered = df_order_history_filtered[~_is_rejected]
+                else:
+                    df_rejected = df_order_history_filtered.iloc[0:0]
+
                 def _fmt_order_history_line(row):
                     if row['주문유형'] == 'MOC':
                         price_str = "시장가"
@@ -861,15 +912,16 @@ def hts_orders_from_supabase(
 
                 order_lines = "\n".join([
                     _fmt_order_history_line(row) for _, row in df_order_history_filtered.iterrows()
-                ])
+                ]) or "   •  (접수된 주문 없음)"
 
                 # [개선] 브로커 거부 주문 즉시 알림
                 # '상태'가 "거부"인 주문은 미체결(주문은 살아있으나 안 맞음)과 달리
                 # 애초에 브로커에 접수조차 안 된 것이라 별도로 알려야 한다.
                 # 기존엔 이 컬럼을 아예 안 봐서 거부돼도 조용히 넘어갔음
                 # (2026-07-31 사이클 #294 매도 거부가 아침까지 발견 안 된 사례).
-                if '상태' in df_order_history_filtered.columns:
-                    df_rejected = df_order_history_filtered[df_order_history_filtered['상태'] == '거부']
+                # 같은 날 다시 실행해도 이미 알린 거부 주문은 다시 알리지 않는다.
+                if not df_rejected.empty:
+                    df_rejected = _filter_new_rejections(selected_user, account_index, df_rejected)
                     if not df_rejected.empty:
                         rejected_lines = "\n".join([
                             f"▶ {row['매매구분']} {row['종목코드']} {row['주문량']}주 "
