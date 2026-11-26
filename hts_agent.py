@@ -994,6 +994,28 @@ def _delayed_restart():
     os._exit(0)
 
 
+_ALLOWED_RELEASE_PATH_PREFIX = "/yeomang/mume-agent/releases/download/"
+
+
+def _is_allowed_release_url(release_url: str) -> bool:
+    """https://github.com/Yeomang/mume-agent/releases/download/... 만 허용 (계정명은 대소문자 무관)."""
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(release_url)
+        port = parsed.port
+    except ValueError:
+        return False
+    if parsed.scheme != "https" or parsed.hostname != "github.com" or port not in (None, 443):
+        return False
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        return False
+    path = parsed.path
+    # 경로 조작(../, 인코딩된 문자, 역슬래시)으로 다른 저장소를 가리키지 못하게
+    if ".." in path or "%" in path or "\\" in path or "//" in path:
+        return False
+    return path.lower().startswith(_ALLOWED_RELEASE_PATH_PREFIX)
+
+
 @app.post("/deploy")
 def deploy(payload: dict = Body(...)):
     release_url: str = payload.get("release_url", "")
@@ -1003,14 +1025,11 @@ def deploy(payload: dict = Body(...)):
     if not release_url:
         raise HTTPException(status_code=400, detail="release_url은 필수입니다.")
 
-    # [보안] 배포 URL 화이트리스트 — github.com/Yeomang 리포지토리에서만 다운로드 허용
-    # 인증키 탈취 시 임의 URL에서 악성 코드를 배포하는 원격 코드 실행(RCE) 공격 방지
-    from urllib.parse import urlparse
-    parsed = urlparse(release_url)
-    allowed_prefixes = ("github.com/yeomang", "github.com/Yeomang", "api.github.com/repos/yeomang", "api.github.com/repos/Yeomang")
-    host_path = f"{parsed.hostname or ''}{parsed.path}".lower()
-    if not any(host_path.startswith(p.lower()) for p in allowed_prefixes):
-        raise HTTPException(status_code=403, detail=f"허용되지 않은 배포 URL입니다: {parsed.hostname}")
+    # [보안] 배포 URL 화이트리스트 — mume-agent 저장소의 Release 파일만 다운로드 허용
+    # 인증키 탈취 시 임의 URL에서 악성 코드를 배포하는 원격 코드 실행(RCE) 공격 방지.
+    # 예전엔 "github.com/yeomang" 앞부분만 봐서 github.com/yeomangx 같은 다른 계정·저장소도 통과했다.
+    if not _is_allowed_release_url(release_url):
+        raise HTTPException(status_code=403, detail=f"허용되지 않은 배포 URL입니다: {release_url[:200]}")
 
     # 실행 중인 작업이 있으면 즉시 배포하지 않고, 작업 종료 후 자동 적용되도록 예약한다.
     # (콘솔 쪽에는 기존과 동일하게 409로 응답 — 재시도는 각 에이전트가 알아서 처리)
