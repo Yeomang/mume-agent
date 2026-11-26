@@ -292,7 +292,10 @@ def orders_execution_update_supabase(
             pass
 
         # 텔레그램 메시지용 주문 내역 포맷 (가격 내림차순)
+        # 브로커가 거부한 주문은 저녁에 거부 알림을 이미 보냈으니 체결 메시지에서는 뺀다 ('미체결'로 보이면 헷갈림)
         _sorted_df = filtered_df.copy()
+        if '주문상태' in _sorted_df.columns:
+            _sorted_df = _sorted_df[_sorted_df['주문상태'] != '거부'].copy()
         _sorted_df['_price'] = _sorted_df['주문단가'].apply(lambda x: float(x) if x else 0)
         _sorted_df = _sorted_df.sort_values(by='_price', ascending=False)
 
@@ -313,7 +316,7 @@ def orders_execution_update_supabase(
                 pnl_part = f" {pnl_emoji}{'+' if sell_pnl >= 0 else ''}${sell_pnl:,.0f}"
             return f"   •  {price_str}  |  {qty_str}  |  {cond_str}  |  {exec_part}{pnl_part}"
 
-        formatted_orders = "\n".join([_fmt_exec_line(order) for _, order in _sorted_df.iterrows()])
+        formatted_orders = "\n".join([_fmt_exec_line(order) for _, order in _sorted_df.iterrows()]) or "   •  (접수된 주문 없음)"
 
         # 기존 자동수집 거래 건수 (텔레그램 2차 알림 분기용 — INSERT 전에 미리 조회)
         _prev_trade_count_for_telegram = 0
